@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from enum import Enum
 from time import perf_counter
@@ -10,7 +9,7 @@ from controls import Controls
 from game_ui import Hud, Interface, Inventory, Point
 from minigame import BalanceDetector, BalancePolicy, PixelBox
 from recorder import NS
-from spots import casting_spot
+from spots import CastTarget, casting_target
 from window import FrameUnavailable, Image, Region, WindowCapture
 
 
@@ -37,7 +36,7 @@ class Cycle:
     caught: int = 0
     escaped: int = 0
     position: Point | None = None
-    candidate: Point | None = None
+    candidate: CastTarget | None = None
     next_scan: float = 0.
     score: dict[Point, int] = field(default_factory=dict)
     gear: str | None = None
@@ -100,6 +99,8 @@ class Auto(Assist):
                 controls.release()
                 policy.choose(None)
                 self._tracking_times.clear()
+                cycle.candidate = None
+                agreement, repetitions = None, 0
                 last_tick = None
                 self._update(text="Pozastaveno. Pokračuj přes F8.", tracking_fps=None)
                 self._stop_requested.wait(.05)
@@ -110,6 +111,8 @@ class Auto(Assist):
                 controls.release()
                 policy.choose(None)
                 self._tracking_times.clear()
+                cycle.candidate = None
+                agreement, repetitions = None, 0
                 crop = None
                 crop_misses = 0
                 last_tick = None
@@ -128,6 +131,7 @@ class Auto(Assist):
             controls.direction(region.hwnd, direction)
             tracking_fps = self._tracking_rate(balance is not None, captured_at)
             if balance:
+                cycle.candidate = None
                 crop_misses = 0
                 if cycle.phase is Phase.CAST:
                     cycle.casts += 1
@@ -164,6 +168,8 @@ class Auto(Assist):
                 repetitions = repetitions + 1 if key is not None and key == agreement else 1
                 agreement = key
                 stable = key is not None and repetitions >= 2
+                if key is None or (cycle.candidate is not None and not stable):
+                    cycle.candidate = None
                 if self.stopping or self.paused:
                     continue
                 if cycle.phase is Phase.GEAR:
@@ -241,15 +247,16 @@ class Auto(Assist):
                     cycle.advance(Phase.GEAR,now)
                 return None
         if now >= cycle.next_scan:
-            point = casting_spot(frame,cycle.preferred(),avoid=cycle.position)
-            cycle.next_scan = now if point is not None else now + .2
-            same = point is not None and cycle.candidate is not None and math.dist(point,cycle.candidate) <= .04
-            if same and not self.stopping and not self.paused and controls.click(region,*point):
-                cycle.position = point
+            preferred = cycle.candidate.point if cycle.candidate else cycle.preferred()
+            target = casting_target(frame,preferred,avoid=cycle.position)
+            cycle.next_scan = now if target is not None else now + .2
+            if (target is not None and target.agrees(cycle.candidate) and not self.stopping
+                    and not self.paused and controls.click(region,*target.point)):
+                cycle.position = target.point
                 cycle.original_energy = hud.energy
                 cycle.saw_waiting_hud = False
                 cycle.advance(Phase.CAST,now,progress=False)
-            cycle.candidate = point
+            cycle.candidate = target
         return None
 
     def _gear(self, cycle: Cycle, inv: Inventory | None, hud: Hud | None, now: float,

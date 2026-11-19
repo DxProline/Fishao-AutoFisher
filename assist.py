@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import math
 import threading
 from collections import deque
 from dataclasses import replace
@@ -12,7 +11,7 @@ import cv2
 from controls import Controls
 from minigame import Balance, BalanceDetector, BalancePolicy, PixelBox
 from recorder import NS, Status, TITLE
-from spots import casting_spot
+from spots import CastTarget, casting_target
 from window import FrameUnavailable, Image, WindowCapture
 
 WAIT_BITE_S = 120.0
@@ -98,7 +97,7 @@ class Assist(threading.Thread):
         last_seen: float | None = None
         balance_start: float | None = None
         throw_time: float | None = None
-        last_spot: tuple[float, float] | None = None
+        last_spot: CastTarget | None = None
         next_spot = 0.0
         next_preview = 0.0
         was_active = False
@@ -108,6 +107,7 @@ class Assist(threading.Thread):
                 controls.release()
                 policy.choose(None)
                 self._tracking_times.clear()
+                last_spot = None
                 was_active = False
                 self._update(text="Pozastaveno. Pokračuj přes F8.", tracking_fps=None)
                 self._stop_requested.wait(0.05)
@@ -118,6 +118,7 @@ class Assist(threading.Thread):
                 controls.release()
                 policy.choose(None)
                 self._tracking_times.clear()
+                last_spot = None
                 roi = None
                 was_active = False
                 self._update(text=str(exc), tracking_fps=None)
@@ -172,9 +173,9 @@ class Assist(threading.Thread):
                     return "Nenalezen vodní bod uvnitř kruhu. Zkontroluj postavení u vody."
                 if active >= next_spot:
                     next_spot = active + 0.40
-                    spot = casting_spot(frame)
-                    stable = spot is not None and last_spot is not None and math.dist(spot, last_spot) <= 0.035
-                    if stable and not self.stopping and not self.paused and controls.click(region, *spot):
+                    spot = casting_target(frame, last_spot.point if last_spot else None)
+                    if (spot is not None and spot.agrees(last_spot) and not self.stopping
+                            and not self.paused and controls.click(region, *spot.point)):
                         throw_time = active
                         self._log.info("Proveden jeden zkušební hod.")
                     last_spot = spot

@@ -10,6 +10,7 @@ import numpy as np
 from bot import Auto, Cycle, Phase
 from game_ui import Hud, Interface, Inventory, SIZE
 from minigame import Balance, BalancePolicy
+from spots import CastTarget
 from window import Region
 
 
@@ -28,7 +29,7 @@ class AutoTest(unittest.TestCase):
         self.assertEqual(self.cycle.phase,Phase.ENERGY)
         self.controls.click.assert_not_called()
         good = Hud(1,7,12,True,available,available)
-        with patch("bot.casting_spot",return_value=(.4,.2)):
+        with patch("bot.casting_target",return_value=CastTarget((.4,.2),(.4,.3),.15,.54)):
             self.auto._ready(self.cycle,good,self.frame,2.,self.controls,self.region)
             self.controls.click.assert_not_called()
             self.auto._ready(self.cycle,good,self.frame,3.,self.controls,self.region)
@@ -53,6 +54,18 @@ class AutoTest(unittest.TestCase):
         self.assertEqual(self.cycle.phase,Phase.GEAR)
         self.auto._gear(self.cycle,None,Hud(2,11,28,True,rod,bait),4.,self.controls,self.region)
         self.assertEqual(self.cycle.phase,Phase.READY)
+
+    def test_changed_rod_range_requires_two_fresh_measurements(self) -> None:
+        default = (.9, .5)
+        hud = Hud(1, 7, 12, True, default, default)
+        small = CastTarget((.4, .2), (.4, .3), .075, .54)
+        large = CastTarget(small.point, small.center, .15, .54)
+        with patch("bot.casting_target", side_effect=(small, large, large)):
+            self.auto._ready(self.cycle, hud, self.frame, 1., self.controls, self.region)
+            self.auto._ready(self.cycle, hud, self.frame, 2., self.controls, self.region)
+            self.controls.click.assert_not_called()
+            self.auto._ready(self.cycle, hud, self.frame, 3., self.controls, self.region)
+        self.controls.click.assert_called_once_with(self.region, *large.point)
 
     def test_result_matching_at_different_sizes(self) -> None:
         ref = Interface()
@@ -120,7 +133,7 @@ class AutoTest(unittest.TestCase):
         with (
             patch("bot.Interface", Ui), patch("bot.BalanceDetector", Detector),
             patch("bot.perf_counter", side_effect=count(step=1.)),
-            patch("bot.casting_spot", return_value=position),
+            patch("bot.casting_target", return_value=CastTarget(position,position,.15,.54)),
             patch.object(auto._stop_requested, "wait"),
             patch.object(auto, "_annotate"),
         ):

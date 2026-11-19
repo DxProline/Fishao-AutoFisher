@@ -16,7 +16,7 @@ from minigame import BalanceDetector, BalancePolicy
 from recorded import Recording
 from recorder import Recorder
 from replay import replay
-from spots import casting_spot
+from spots import casting_spot, casting_target
 from vision import VisualDetector
 from window import Region
 
@@ -116,6 +116,7 @@ class RecordedWorkflow(unittest.TestCase):
     def test_test_cast_requires_circle_and_water(self) -> None:
         scene = np.full((550, 680, 3), (174, 222, 237), np.uint8)
         scene[:230] = (207, 206, 63)
+        cv2.ellipse(scene, (305, 227), (14, 13), 0, 0, 360, (170, 50, 105), -1)
         self.assertIsNone(casting_spot(scene))
         cv2.circle(scene, (305, 254), 166, (241, 247, 249), 4, cv2.LINE_AA)
         point = casting_spot(scene)
@@ -129,6 +130,37 @@ class RecordedWorkflow(unittest.TestCase):
         ax, ay = alternate[0] * 680, alternate[1] * 550
         self.assertLess(ay, 230)
         self.assertLess((ax - 305) ** 2 + (ay - 254) ** 2, 166**2)
+
+    def test_sizes_changes_and_land_for_each_rod(self) -> None:
+        center = (380, 277)
+        previous = None
+        for radius in (40, 85, 166, 270, 360):
+            with self.subTest(radius=radius):
+                scene = np.full((550, 760, 3), (24, 160, 65), np.uint8)
+                scene[:, :370] = (207, 134, 20)
+                cv2.ellipse(scene, (380, 250), (14, 13), 0, 0, 360, (170, 50, 105), -1)
+                self.assertIsNone(casting_target(scene))
+                cv2.circle(scene, center, radius, (225, 230, 235), 3, cv2.LINE_AA)
+                selection = casting_target(scene, preferred=(.58, .50))
+                self.assertIsNotNone(selection)
+                x, y = selection.point[0] * 760, selection.point[1] * 550
+                self.assertLess(x, 370)
+                self.assertLess(np.hypot(x - center[0], y - center[1]), .86 * radius)
+                self.assertAlmostEqual(selection.radius * 760, radius, delta=4)
+                self.assertFalse(selection.agrees(previous))
+                self.assertTrue(selection.agrees(selection))
+                previous = selection
+
+    def test_blueshifted_sand_does_not_pass_as_water(self) -> None:
+        scene = np.full((550, 680, 3), (106, 67, 220), np.uint8)
+        scene[:245] = (100, 117, 209)
+        scene = cv2.cvtColor(scene, cv2.COLOR_HSV2BGR)
+        cv2.circle(scene, (305, 254), 166, (218, 224, 229), 3, cv2.LINE_AA)
+        self.assertIsNone(casting_target(scene))
+        cv2.ellipse(scene, (305, 227), (14, 13), 0, 0, 360, (170, 50, 105), -1)
+        point = casting_spot(scene, preferred=(305 / 680, 365 / 550))
+        self.assertIsNotNone(point)
+        self.assertLess(point[1] * 550, 245)
 
     def test_write_inputs_and_frames(self) -> None:
         base = self.base
