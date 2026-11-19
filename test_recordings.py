@@ -157,6 +157,34 @@ class RecordedWorkflow(unittest.TestCase):
                 self.assertTrue(selection.agrees(selection))
                 previous = selection
 
+    def test_cast_uses_opposite_arcs_of_a_clipped_rod_circle(self) -> None:
+        width, height = 900, 485
+        center = (450, 242)
+        yy, xx = np.ogrid[:height, :width]
+        water = xx > 454 - .9 * (yy - center[1])
+        scene = np.full((height, width, 3), (12, 155, 98), np.uint8)
+        scene[water] = (211, 135, 9)
+        cv2.ellipse(scene, (450, 222), (11, 10), 0, 0, 360, (158, 37, 97), -1, cv2.LINE_AA)
+        self.assertIsNone(casting_target(scene))
+
+        for radius in (355, 425):
+            with self.subTest(radius=radius):
+                rim = np.zeros((height, width), np.uint8)
+                cv2.circle(rim, center, radius, 255, 2, cv2.LINE_AA)
+                if radius == 355:
+                    rim[center[1]:] = 0
+                alpha = .10 * rim[:, :, None] / 255
+                frame = np.rint(scene * (1 - alpha) + 255 * alpha).astype(np.uint8)
+                target = casting_target(frame)
+                self.assertIsNotNone(target)
+                x, y = round(target.point[0] * width), round(target.point[1] * height)
+                self.assertTrue(water[y, x])
+                self.assertLess(np.hypot(x - center[0], y - center[1]), .86 * radius)
+                self.assertAlmostEqual(target.radius * width, radius, delta=4)
+
+                frame[:, :center[0]] = scene[:, :center[0]]
+                self.assertIsNone(casting_target(frame))
+
     def test_pier_uses_only_the_nearest_side_of_the_water(self) -> None:
         scene = np.full((550, 760, 3), (207, 134, 20), np.uint8)
         scene[:, 308:414] = (55, 118, 185)

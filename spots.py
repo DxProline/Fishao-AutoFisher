@@ -84,8 +84,11 @@ def _circles(gray: np.ndarray, avatars: list[tuple[float, float, int, int]]) -> 
     height, width = gray.shape
     angles = np.linspace(0, 2 * np.pi, 96, endpoint=False, dtype=np.float32)
     radii = np.arange(max(12, min(height, width) * .04), hypot(width, height), dtype=np.float32)
-    ray_x = radii[:, None] * np.cos(angles)
-    ray_y = radii[:, None] * np.sin(angles)
+    cosines, sines = np.cos(angles), np.sin(angles)
+    ray_x = radii[:, None] * cosines
+    ray_y = radii[:, None] * sines
+    tested_radii = radii[7:-7]
+    opposing_sides = tuple((axis >= .65, axis <= -.65) for axis in (cosines, sines))
     result = []
     for ax, ay, hat_w, hat_h in avatars:
         best = None
@@ -102,8 +105,22 @@ def _circles(gray: np.ndarray, avatars: list[tuple[float, float, int, int]]) -> 
                 support = hits.sum(axis=1) / np.maximum(1, visible)
                 strength = np.minimum(contrast, 14).clip(0) * hits
                 # Malé světlé oblouky mezi nohama a rukama nejsou kruh prutu.
-                plausible_radius = radii[7:-7] >= 1.35 * hat_h
-                scores = np.where(plausible_radius & (sectors >= 3) & (visible >= 40) & (support >= .30),
+                plausible_radius = tested_radii >= 1.35 * hat_h
+                enough_sectors = (sectors >= 3) & (visible >= 40) & (support >= .30)
+                # Velký kruh může z okna vyčnívat nahoře i dole. Pak stačí
+                # dva protilehlé oblouky téhož kruhu, každý s vlastní oporou.
+                enough_arcs = np.zeros_like(enough_sectors)
+                for (positive, negative), span in zip(
+                        opposing_sides, (max(cy, height - cy), max(cx, width - cx))):
+                    clipped = np.flatnonzero((tested_radii > span) & (visible >= 24)
+                                             & (support >= .38) & ~enough_sectors)
+                    if clipped.size:
+                        for side in (positive, negative):
+                            samples = np.ix_(clipped, side)
+                            side_hits = hits[samples].sum(axis=1)
+                            clipped = clipped[(side_hits >= 7) & (side_hits >= .38 * valid[samples].sum(axis=1))]
+                        enough_arcs[clipped] = True
+                scores = np.where(plausible_radius & (enough_sectors | enough_arcs),
                                   support + strength.sum(axis=1) / (np.maximum(1, visible) * 55), 0.)
                 i = int(scores.argmax())
                 if scores[i] > 0 and (best is None or scores[i] > best[0]):
