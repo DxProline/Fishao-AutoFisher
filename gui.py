@@ -10,12 +10,12 @@ from queue import Empty, SimpleQueue
 from tkinter import messagebox, ttk
 
 import cv2
-import numpy as np
 
 from assist import Assist
 from bot import Auto
 from hotkeys import Hotkeys
 from recorder import NS, Recorder, Status
+from window import Image
 
 BG = "#101e28"
 PANEL = "#1a303c"
@@ -35,10 +35,12 @@ class GuiLog(logging.Handler):
 
 class App:
     def __init__(self, root: tk.Tk, output_dir: Path, fps: int, *, assist: bool = False,
-                 cast_once: bool = False, autofish: bool = False, auto_casts: int | None = None) -> None:
+                 cast_once: bool = False, autofish: bool = False, auto_casts: int | None = None,
+                 image_format: str = "jpg") -> None:
         self.root = root
         self.output_dir = output_dir
         self.fps = fps
+        self.image_format = image_format
         self.recorder: Recorder | Assist | None = None
         self.assist = assist
         self.cast_once = cast_once
@@ -53,14 +55,14 @@ class App:
         self.folder = tk.StringVar(value=str(output_dir))
         self.preview_photo: tk.PhotoImage | None = None
         self.preview_index = -1
-        self.preview_bytes: bytes | None = None
+        self.preview_frame: Image | None = None
         self.shortcut_warning: str | None = None
         self.log_handlers = self._log_setup()
         self.hotkeys = Hotkeys(lambda: self.actions.put("toggle"), self._emergency)
         self._build()
         self.hotkeys.start()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
-        self.root.after(75, self._poll)
+        self.root.after(33, self._poll)
 
     def _log_setup(self) -> tuple[logging.Handler, logging.Handler]:
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -120,11 +122,11 @@ class App:
         cards = ttk.Frame(shell)
         cards.pack(fill="x", pady=(0, 10))
         self.metrics: dict[str, tk.StringVar] = {}
-        labels = ("Minihry", "Vzorky", "Průměr sn./s", "Čas snímání") if self.assist else (
+        labels = ("Minihry", "Vzorky", "Sledování sn./s", "Čas snímání") if self.assist else (
             "Uloženo", "Vynecháno", "Průměr sn./s", "Čas snímání", "Vstupy",
         )
         if self.autofish:
-            labels = ("Hody", "Chyceno", "Uteklo", "Čas snímání")
+            labels = ("Hody", "Chyceno", "Uteklo", "Sledování sn./s", "Čas snímání")
         for idx, label in enumerate(labels):
             cards.columnconfigure(idx, weight=1, uniform="cards")
             card = ttk.Frame(cards, style="Card.TFrame", padding=(10, 5))
@@ -161,21 +163,17 @@ class App:
         self._render_preview()
 
     def _render_preview(self) -> None:
-        if self.preview_bytes is None:
-            return
-        image = cv2.imdecode(np.frombuffer(self.preview_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+        image = self.preview_frame
         if image is None:
             return
         h, w = image.shape[:2]
-        scale = min(1.0, self.canvas.winfo_width() / w, self.canvas.winfo_height() / h)
-        png = self.preview_bytes
+        scale = min(1.0, 920/w, 520/h, self.canvas.winfo_width() / w, self.canvas.winfo_height() / h)
         if scale < 1.0:
             image = cv2.resize(image, (max(1, round(w * scale)), max(1, round(h * scale))), interpolation=cv2.INTER_AREA)
-            ok, encoded = cv2.imencode(".png", image, [cv2.IMWRITE_PNG_COMPRESSION, 1])
-            if not ok:
-                return
-            png = encoded.tobytes()
-        self.preview_photo = tk.PhotoImage(master=self.root, data=base64.b64encode(png).decode("ascii"), format="png")
+        ok, encoded = cv2.imencode(".png", image, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+        if not ok:
+            return
+        self.preview_photo = tk.PhotoImage(master=self.root, data=base64.b64encode(encoded).decode("ascii"), format="png")
         self.canvas.itemconfigure(self.canvas_image, image=self.preview_photo)
         self.canvas.itemconfigure(self.canvas_message, state="hidden")
 
@@ -200,13 +198,14 @@ class App:
         else:
             self.preview_index = -1
             self.preview_photo = None
-            self.preview_bytes = None
+            self.preview_frame = None
             self.canvas.itemconfigure(self.canvas_image, image="")
             self.canvas.itemconfigure(self.canvas_message, state="normal")
             if self.autofish:
                 self.recorder = Auto(self.auto_casts)
             else:
-                self.recorder = Assist(self.cast_once) if self.assist else Recorder(self.output_dir, self.fps)
+                self.recorder = Assist(self.cast_once) if self.assist else Recorder(
+                    self.output_dir, self.fps, image_format=self.image_format)
             self.recorder.start()
         self._buttons()
 
@@ -234,12 +233,12 @@ class App:
             self.status.set(state.text + " Záznam vstupů nedostupný. Podrobnosti v Událostech.")
         self.folder.set(str(state.folder or self.output_dir))
         sec = state.active_ns // NS
-        counted = state.captured if self.assist else state.saved
-        fps = counted * NS / state.active_ns if state.active_ns else None
+        fps = state.saved * NS / state.active_ns if state.active_ns else None
         for label, value in {
             "Uloženo": str(state.saved),
             "Vynecháno": str(state.dropped + state.missed),
             "Průměr sn./s": f"{fps:.1f}" if fps is not None else "—",
+            "Sledování sn./s": f"{state.tracking_fps:.1f}" if state.tracking_fps is not None else "—",
             "Čas snímání": f"{sec // 3600:02}:{sec // 60 % 60:02}:{sec % 60:02}",
             "Vstupy": str(state.inputs),
             "Minihry": str(state.saved),
@@ -251,7 +250,7 @@ class App:
             if label in self.metrics:
                 self.metrics[label].set(value)
         if state.preview is not None and state.preview[0] != self.preview_index:
-            self.preview_index, self.preview_bytes = state.preview
+            self.preview_index, self.preview_frame = state.preview
             self._render_preview()
 
     def _events(self) -> None:
@@ -300,7 +299,7 @@ class App:
                 handler.close()
             self.root.destroy()
         else:
-            self.root.after(75, self._poll)
+        self.root.after(33, self._poll)
 
     def close(self) -> None:
         self.closing = True

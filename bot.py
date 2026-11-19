@@ -5,11 +5,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from time import perf_counter
 
-from assist import TARGET_HZ, Assist
+from assist import TARGET_HZ, TRACK_MISSES, Assist
 from controls import Controls
 from game_ui import Hud, Interface, Inventory, Point
 from minigame import BalanceDetector, BalancePolicy, PixelBox
-from recorder import NS, Recorder
+from recorder import NS
 from spots import casting_spot
 from window import FrameUnavailable, Image, Region, WindowCapture
 
@@ -93,13 +93,15 @@ class Auto(Assist):
         result_seen = 0
         next_preview = active = 0.
         last_tick: float | None = None
+        crop_misses = 0
         while not self.stopping:
             tick = perf_counter()
             if self.paused:
                 controls.release()
                 policy.choose(None)
+                self._tracking_times.clear()
                 last_tick = None
-                self._update(text="Pozastaveno. Pokračuj přes F8.")
+                self._update(text="Pozastaveno. Pokračuj přes F8.", tracking_fps=None)
                 self._stop_requested.wait(.05)
                 continue
             try:
@@ -107,21 +109,26 @@ class Auto(Assist):
             except FrameUnavailable as exc:
                 controls.release()
                 policy.choose(None)
+                self._tracking_times.clear()
                 crop = None
+                crop_misses = 0
                 last_tick = None
-                self._update(text=str(exc))
+                self._update(text=str(exc), tracking_fps=None)
                 self._stop_requested.wait(.05)
                 continue
             if last_tick is not None:
                 active += tick - last_tick
             last_tick = tick
             selected_crop = crop
+            captured_at = perf_counter()
             balance = detector.analyze_crop(frame, crop[0], crop[1]) if crop else detector.analyze(frame)
-            direction = policy.choose(balance, perf_counter())
+            direction = policy.choose(balance, captured_at)
             if self.stopping or self.paused:
                 continue
             controls.direction(region.hwnd, direction)
+            tracking_fps = self._tracking_rate(balance is not None, captured_at)
             if balance:
+                crop_misses = 0
                 if cycle.phase is Phase.CAST:
                     cycle.casts += 1
                 cycle.advance(Phase.BALANCE, active)
@@ -133,8 +140,11 @@ class Auto(Assist):
                 crop = (left,top,right-left,bottom-top)
                 message = cycle.phase.value + (" · ←" if direction == "left" else " · →" if direction == "right" else " · střed")
             elif selected_crop:
-                crop = None
-                continue
+                crop_misses += 1
+                if crop_misses >= TRACK_MISSES:
+                    crop = None
+                    crop_misses = 0
+                message = "Hledám ukazatel na liště minihry."
             else:
                 image = ui.normalize(frame)
                 result = ui.result(image) if cycle.phase is not Phase.GEAR else None
@@ -198,12 +208,13 @@ class Auto(Assist):
                 if cycle.phase is Phase.GEAR and cycle.gear_step == "unavailable":
                     message = "Čekám na dostupný prut nebo návnadu."
             if active >= next_preview:
-                next_preview = active + .33
-                preview = frame.copy()
+                next_preview = active + (1/24 if selected_crop else .12)
+                preview = frame.copy() if balance else frame
                 if balance:
                     self._annotate(preview,balance,selected_crop)
-                self._update(preview=(round(tick*NS),Recorder._preview(preview)))
-            self._update(text=message,casts=cycle.casts,caught=cycle.caught,escaped=cycle.escaped,active_ns=round(active*NS))
+                self._update(preview=(round(tick*NS),preview))
+            self._update(text=message,casts=cycle.casts,caught=cycle.caught,escaped=cycle.escaped,
+                         active_ns=round(active*NS), tracking_fps=tracking_fps)
             interval = 1/TARGET_HZ if crop else .06
             self._stop_requested.wait(max(0., interval-(perf_counter()-tick)))
         return "AutoFish vypnutý. Šipky uvolněné."

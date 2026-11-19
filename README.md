@@ -17,11 +17,11 @@ $python = 'C:\Users\jenda\PycharmProjects\PythonProject6\.venv\Scripts\python.ex
 3. **F8** pozastaví nebo obnoví relaci. Přepnutí z hry přeruší snímání i sběr herních vstupů. **F9** zastaví snímání a záznamník dopíše už pořízené snímky.
 4. Tlačítko **Otevřít složku** ukáže relaci v `recordings/fishao_<čas>/`. V GUI zkontroluj, že hodnota **Vstupy** po hraní roste. Případné selhání registrace Windows uvidíš v panelu **Události**.
 
-PNG snímky mají původní rozlišení klientské plochy. Výchozí cíl je 15 sn./s. Volby `--fps 15` a `--output-dir D:\FishaoZaznamy` nastaví snímkovou frekvenci a umístění. MSS snímá viditelné pixely. Po dobu záznamu ponech okno hry bez překryvů.
+Snímky mají původní rozlišení klientské plochy. Výchozí cíl je **60 sn./s v JPEG**. Volba `--fps` nastaví cíl mezi 1 a 120 sn./s. Volbou `--image-format png` zapneš bezeztrátové snímky. `--output-dir D:\FishaoZaznamy` změní umístění. MSS snímá viditelné pixely. Po dobu záznamu ponech okno hry bez překryvů.
 
 | Soubor | Obsah |
 | --- | --- |
-| `frames.jsonl` | Index uložených PNG, skutečné časy pořízení a rozměry okna. |
+| `frames.jsonl` | Index uložených snímků, skutečné časy pořízení a rozměry okna. |
 | `inputs.jsonl` | Stisk a uvolnění kláves a tlačítek myši během aktivní relace ve hře. Kliknutí mají souřadnice od levého horního rohu klientské plochy a poměry vůči její šířce a výšce. F8 a F9 ovládají relaci. |
 | `events.jsonl` | Zahájení snímání, pauzy, čekání na okno, změny rozměru a konec. |
 | `session.json` | Stav a souhrn relace včetně počtu uložených snímků a vstupů. |
@@ -50,6 +50,8 @@ Offline přehrávač analyzuje stabilitu scény, sledované oblasti, jejich posu
 ```
 
 Spusť asistenci přes **F8** a ručně nahoď. Po rozpoznání lišty aplikace drží opačnou šipku podle vychýlení a rychlosti ukazatele. Uprostřed ji uvolní, pokud tam ukazatel zůstává. Jakmile lištu najde, snímá výřez kolem ní s cílem až 90 vzorků za sekundu. Skutečnou rychlost měří GUI. Ztratí-li lištu nebo fokus, uvolní vstup. **F8** je pauza, **F9** konec. Po zmizení lišty zkontroluj výsledek a zavři jej klávesou Esc.
+
+Ukazatel **Sledování sn./s** měří frekvenci úspěšného rozpoznání tečky. Náhled běží odděleně a aktualizuje se v minihře nejvýše 24krát za sekundu. Po ojedinělém výpadku rozpoznání zůstává snímání ve výřezu lišty, aby se tečka rychle znovu zachytila.
 
 Volitelný režim jednoho zkušebního hodu:
 

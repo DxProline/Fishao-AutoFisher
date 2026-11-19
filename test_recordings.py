@@ -149,7 +149,7 @@ class RecordedWorkflow(unittest.TestCase):
             def join(self): pass
 
         with patch("recorder.WindowCapture", Capture), patch("recorder.GameInput", Input):
-            recorder = Recorder(self.root / "capture", 15)
+            recorder = Recorder(self.root / "capture", 60)
             recorder.start()
             until = time.monotonic() + 3
             while recorder.snapshot().saved < 3 and not recorder.snapshot().finished and time.monotonic() < until:
@@ -162,6 +162,8 @@ class RecordedWorkflow(unittest.TestCase):
         self.assertGreaterEqual(status.saved, 3)
         self.assertEqual(status.inputs, 1)
         recording = Recording(status.folder)
+        self.assertEqual(recording.frames[0].path.suffix, ".jpg")
+        self.assertEqual(recording.frames[0].load().shape, base.shape)
         self.assertEqual([e["key"] for e in recording.events() if e["type"] == "key_down"], ["Space"])
 
 

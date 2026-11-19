@@ -47,7 +47,8 @@ class Status:
     elapsed_ns: int = 0
     finished: bool = False
     error: bool = False
-    preview: tuple[int, bytes] | None = None
+    tracking_fps: float | None = None
+    preview: tuple[int, Image] | None = None
 
 
 def utc_now() -> str:
@@ -60,11 +61,14 @@ def row(stream: TextIO, data: dict[str, object]) -> None:
 
 
 class Recorder(threading.Thread):
-    def __init__(self, output_dir: Path, fps: int, title: str = TITLE) -> None:
+    def __init__(self, output_dir: Path, fps: int, title: str = TITLE, *, image_format: str = "jpg") -> None:
         super().__init__(name="FishaoRecorder", daemon=True)
         self.output_dir = output_dir
         self.fps = fps
         self.title = title
+        if image_format not in ("jpg", "png"):
+            raise ValueError("Formát snímků musí být jpg nebo png.")
+        self.image_format = image_format
         self._state = Status()
         self._lock = threading.Lock()
         self._stop_requested = threading.Event()
@@ -123,6 +127,9 @@ class Recorder(threading.Thread):
 
     def _writer(self, folder: Path) -> None:
         written = 0
+        suffix = "." + self.image_format
+        options = ([cv2.IMWRITE_JPEG_QUALITY, 93] if self.image_format == "jpg"
+                   else [cv2.IMWRITE_PNG_COMPRESSION, 1])
         try:
             with (folder / "frames.jsonl").open("x", encoding="utf-8") as index:
                 while not self._writing_done.is_set() or not self._frames.empty():
@@ -130,9 +137,9 @@ class Recorder(threading.Thread):
                         frame = self._frames.get(timeout=0.05)
                     except queue.Empty:
                         continue
-                    filename = f"frames/{frame.index:08d}.png"
+                    filename = f"frames/{frame.index:08d}{suffix}"
                     path = folder / filename
-                    ok, data = cv2.imencode(".png", frame.image, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+                    ok, data = cv2.imencode(suffix, frame.image, options)
                     if not ok:
                         raise OSError(f"Snímek {frame.index} se nepodařilo zakódovat.")
                     temporary = path.with_suffix(".tmp")
@@ -169,7 +176,7 @@ class Recorder(threading.Thread):
         writer: threading.Thread | None = None
         started = perf_counter_ns()
         metadata: dict[str, object] = {
-            "schema": 2, "title": self.title, "target_fps": self.fps, "format": "png",
+            "schema": 2, "title": self.title, "target_fps": self.fps, "format": self.image_format,
             "started_utc": utc_now(), "frames_index": "frames.jsonl", "events_index": "events.jsonl",
             "inputs_index": "inputs.jsonl",
             "timestamp_unit": "nanoseconds_since_session_start", "status": "recording",
@@ -245,17 +252,6 @@ class Recorder(threading.Thread):
         if shutil.disk_usage(folder).free < MIN_FREE_BYTES:
             raise OSError("Na cílovém disku zbývá méně než 256 MB.")
 
-    @staticmethod
-    def _preview(image: Image) -> bytes:
-        h, w = image.shape[:2]
-        ratio = min(1.0, 920 / w, 520 / h)
-        if ratio < 1.0:
-            image = cv2.resize(image, (max(1, round(w * ratio)), max(1, round(h * ratio))), interpolation=cv2.INTER_AREA)
-        ok, encoded = cv2.imencode(".png", image, [cv2.IMWRITE_PNG_COMPRESSION, 1])
-        if not ok:
-            raise OSError("Ladicí náhled se nepodařilo zakódovat.")
-        return encoded.tobytes()
-
     def _record(self, capture: WindowCapture, events: TextIO, inputs: TextIO, started: int,
                 folder: Path, monitor: GameInput) -> None:
         interval = NS // self.fps
@@ -329,8 +325,8 @@ class Recorder(threading.Thread):
                 except queue.Full:
                     dropped += 1
                 if stamp >= next_preview:
-                    self._update(preview=(frame.index, self._preview(image)))
-                    next_preview = stamp + NS // 4
+                    self._update(preview=(frame.index, image))
+                    next_preview = stamp + NS // 12
                 active = accumulated + (stamp - active_since if active_since is not None else 0)
                 self._update(captured=captured, dropped=dropped, missed=missed, elapsed_ns=stamp - started, active_ns=active)
         finally:

@@ -77,8 +77,9 @@ class AutoTest(unittest.TestCase):
         auto = Auto()
         ready, busy, balance, caught = range(4)
         sequence = iter([ready] * 3 + [busy] * 145 + [ready] * 3 + [busy] * 2
-                        + [balance] * 2 + [caught] * 3 + [ready] * 3)
+                        + [balance, caught, balance] + [caught] * 6 + [ready] * 3)
         states_seen: list[int] = []
+        crop_used: list[bool] = []
         region = self.region
         position = (.5, .5)
 
@@ -86,6 +87,7 @@ class AutoTest(unittest.TestCase):
             def grab(self, *args, **kwargs):
                 state = next(sequence)
                 states_seen.append(state)
+                crop_used.append(bool(args[0]))
                 return np.full((8, 8, 3), state, np.uint8), region
 
         class Ui:
@@ -120,13 +122,20 @@ class AutoTest(unittest.TestCase):
             patch("bot.perf_counter", side_effect=count(step=1.)),
             patch("bot.casting_spot", return_value=position),
             patch.object(auto._stop_requested, "wait"),
-            patch("bot.Recorder._preview", return_value=b""),
             patch.object(auto, "_annotate"),
         ):
             self.assertIn("vypnutý", auto._loop(Capture(), self.controls))
-        self.assertEqual(input_frames, [3, 151, 161])
+        self.assertEqual(input_frames, [3, 151, 165])
+        self.assertTrue(crop_used[154])
+        self.assertTrue(crop_used[155])
         self.controls.escape.assert_called_once()
         self.assertEqual(auto.snapshot().caught, 1)
+
+    def test_tracking_rate_counts_detections_and_expires(self) -> None:
+        self.assertIsNone(self.auto._tracking_rate(True, 1.))
+        self.assertAlmostEqual(self.auto._tracking_rate(True, 1.02), 50.)
+        self.assertAlmostEqual(self.auto._tracking_rate(False, 1.04), 25.)
+        self.assertIsNone(self.auto._tracking_rate(False, 2.))
 
     def test_predicts_fast_drift_and_resets_after_missing_marker(self) -> None:
         policy = BalancePolicy()

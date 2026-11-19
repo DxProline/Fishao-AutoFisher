@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import math
 import threading
+from collections import deque
 from dataclasses import replace
 from time import perf_counter
 
@@ -10,7 +11,7 @@ import cv2
 
 from controls import Controls
 from minigame import Balance, BalanceDetector, BalancePolicy, PixelBox
-from recorder import NS, Recorder, Status, TITLE
+from recorder import NS, Status, TITLE
 from spots import casting_spot
 from window import FrameUnavailable, Image, WindowCapture
 
@@ -18,6 +19,7 @@ WAIT_BITE_S = 120.0
 BALANCE_LIMIT_S = 120.0
 FIND_SPOT_S = 20.0
 TARGET_HZ = 90
+TRACK_MISSES = 4
 
 
 class Assist(threading.Thread):
@@ -30,6 +32,7 @@ class Assist(threading.Thread):
         self._stop_requested = threading.Event()
         self._paused = threading.Event()
         self._log = logging.getLogger("fishao")
+        self._tracking_times: deque[float] = deque()
 
     @property
     def stopping(self) -> bool:
@@ -54,6 +57,16 @@ class Assist(threading.Thread):
 
     def _update(self, **changes: object) -> None:
         self._state = replace(self._state, **changes)
+
+    def _tracking_rate(self, detected: bool, now: float) -> float | None:
+        times = self._tracking_times
+        while times and now - times[0] > .75:
+            times.popleft()
+        if detected:
+            times.append(now)
+        if len(times) < 2 or times[0] == times[-1]:
+            return None
+        return (len(times) - 1) / (now - times[0])
 
     def run(self) -> None:
         final = "Asistence ukončena."
@@ -94,8 +107,9 @@ class Assist(threading.Thread):
             if self.paused:
                 controls.release()
                 policy.choose(None)
+                self._tracking_times.clear()
                 was_active = False
-                self._update(text="Pozastaveno. Pokračuj přes F8.")
+                self._update(text="Pozastaveno. Pokračuj přes F8.", tracking_fps=None)
                 self._stop_requested.wait(0.05)
                 continue
             try:
@@ -103,9 +117,10 @@ class Assist(threading.Thread):
             except FrameUnavailable as exc:
                 controls.release()
                 policy.choose(None)
+                self._tracking_times.clear()
                 roi = None
                 was_active = False
-                self._update(text=str(exc))
+                self._update(text=str(exc), tracking_fps=None)
                 self._stop_requested.wait(0.05)
                 continue
             now = perf_counter()
@@ -119,7 +134,7 @@ class Assist(threading.Thread):
                 reading = detector.analyze_crop(frame, x, y)
                 if reading is None:
                     failed_in_crop += 1
-                    if failed_in_crop >= 2:
+                    if failed_in_crop >= TRACK_MISSES:
                         roi = None
                 else:
                     failed_in_crop = 0
@@ -166,15 +181,16 @@ class Assist(threading.Thread):
             else:
                 status = "Čekám na lištu minihry. Nahoď ručně."
             if now >= next_preview:
-                next_preview = now + 0.25
-                shown = frame.copy()
+                next_preview = now + (1/24 if entry_box else .12)
+                shown = frame.copy() if reading else frame
                 if reading:
                     self._annotate(shown, reading, entry_box)
-                self._update(preview=(round(now * NS), Recorder._preview(shown)))
+                self._update(preview=(round(now * NS), shown))
             self._update(
                 text=status, captured=samples, saved=int(balance_start is not None),
                 active_ns=round((active - balance_start) * NS) if balance_start is not None else 0,
                 elapsed_ns=round((now - start) * NS),
+                tracking_fps=self._tracking_rate(reading is not None, now),
             )
             self._stop_requested.wait(max(0.0, 1 / TARGET_HZ - (perf_counter() - iteration)))
         return "Asistence zastavena. Šipky uvolněné."

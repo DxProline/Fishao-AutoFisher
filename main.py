@@ -11,7 +11,8 @@ def main() -> None:
         raise SystemExit("Fishao Záznamník vyžaduje Windows.")
     parser = argparse.ArgumentParser(description="Záznam ručního hraní FISHAO - Reborn.")
     parser.add_argument("--output-dir", type=Path, default=Path(__file__).resolve().parent / "recordings")
-    parser.add_argument("--fps", type=int, choices=range(1, 31), default=15, metavar="1–30")
+    parser.add_argument("--fps", type=int, choices=range(1, 121), default=60, metavar="1-120")
+    parser.add_argument("--image-format", choices=("jpg", "png"), default="jpg", help="Formát záznamu.")
     parser.add_argument("--assist", action="store_true", help="Spustí asistenci jedné minihry.")
     parser.add_argument("--autofish", "--auto", dest="autofish", action="store_true",
                         help="Spustí AutoFish, který loví do ručního vypnutí.")
@@ -40,7 +41,7 @@ def main() -> None:
         from gui import App
 
         App(root, args.output_dir.resolve(), args.fps, assist=args.assist, cast_once=args.test_cast,
-            autofish=args.autofish, auto_casts=args.max_casts)
+            autofish=args.autofish, auto_casts=args.max_casts, image_format=args.image_format)
     except Exception as exc:
         root.withdraw()
         messagebox.showerror("Fishao Záznamník", f"Aplikaci nelze otevřít.\n{exc}", parent=root)
