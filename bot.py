@@ -159,7 +159,9 @@ class Auto(Assist):
                 if cycle.phase is Phase.BALANCE and active - last_seen > .10:
                     cycle.advance(Phase.RESULT, active)
                 if result and result_seen >= 2 and cycle.phase not in (Phase.CLOSE, Phase.GEAR):
-                    expected_result = cycle.phase in (Phase.WAIT, Phase.BALANCE, Phase.RESULT)
+                    expected_result = cycle.phase in (Phase.CAST, Phase.WAIT, Phase.BALANCE, Phase.RESULT)
+                    if cycle.phase is Phase.CAST:
+                        cycle.casts += 1
                     cycle.finish_attempt(active, result if expected_result else None)
                     cycle.advance(Phase.CLOSE,active)
                     cycle.next_action = active
@@ -179,12 +181,14 @@ class Auto(Assist):
                 elif cycle.phase is Phase.CLOSE:
                     if result and result_seen >= 2 and active >= cycle.next_action:
                         close = ui.result_close(image, result) if cycle.retries else None
-                        closed = (controls.click(region, *close) if close is not None
-                                  else controls.escape(region.hwnd))
+                        closed = close is not None and controls.click(region, *close)
+                        if not closed:
+                            closed = controls.escape(region.hwnd)
                         if closed:
                             cycle.retries += 1
-                        cycle.next_action = active + .7
+                        cycle.next_action = active + .35
                     elif stable:
+                        self._log.info("Výsledek zavřen, hra je připravena.")
                         if self._limit_reached(cycle):
                             return "Dosažen zvolený limit nahození. Hotovo."
                         cycle.advance(Phase.READY,active)
@@ -196,6 +200,7 @@ class Auto(Assist):
                         cycle.saw_waiting_hud = not hud.ready
                         cycle.advance(Phase.WAIT,active)
                         cycle.casts += 1
+                        self._log.info("Nahození potvrzeno. Pokusy: %s.", cycle.casts)
                     elif stable and active - cycle.since >= CAST_ACK_S:
                         cycle.retries += 1
                         cycle.finish_attempt(active)
@@ -270,6 +275,7 @@ class Auto(Assist):
                     cycle.original_energy = hud.energy
                     cycle.saw_waiting_hud = False
                     cycle.advance(Phase.CAST,now,progress=False)
+                    self._log.info("Klik na vodu v kruhu dosahu: %.3f, %.3f.", *target.point)
             cycle.candidate = target
         return None
 

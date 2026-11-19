@@ -151,6 +151,17 @@ class RecordedWorkflow(unittest.TestCase):
                 self.assertTrue(selection.agrees(selection))
                 previous = selection
 
+    def test_pier_uses_only_the_nearest_side_of_the_water(self) -> None:
+        scene = np.full((550, 760, 3), (207, 134, 20), np.uint8)
+        scene[:, 308:414] = (55, 118, 185)
+        cv2.ellipse(scene, (402, 249), (14, 13), 0, 0, 360, (170, 50, 105), -1)
+        cv2.circle(scene, (402, 277), 180, (225, 230, 235), 3, cv2.LINE_AA)
+        target = casting_target(scene)
+        self.assertIsNotNone(target)
+        x, y = target.point[0] * 760, target.point[1] * 550
+        self.assertGreater(x, 414)
+        self.assertLess(np.hypot(x - 402, y - 277), .86 * 180)
+
     def test_blueshifted_sand_does_not_pass_as_water(self) -> None:
         scene = np.full((550, 680, 3), (106, 67, 220), np.uint8)
         scene[:245] = (100, 117, 209)

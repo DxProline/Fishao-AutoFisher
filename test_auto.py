@@ -104,6 +104,23 @@ class AutoTest(unittest.TestCase):
             self.assertEqual(ref.result(ref.normalize(resized)),label)
         self.assertIsNone(ref.result(self.frame))
 
+    def test_energy_anchor_ignores_background_behind_lightning(self) -> None:
+        ui = Interface()
+        frame = self.frame.copy()
+        for name, x, y in (("energy", 503, 8), ("rod", 1151, 328), ("bait", 1151, 448)):
+            tile = ui.templates[name]
+            h, w = tile.shape[:2]
+            frame[y:y+h, x:x+w] = tile
+        lightning = ui.templates["energy"]
+        h, w = lightning.shape[:2]
+        patch = frame[8:8+h, 503:503+w]
+        patch[ui.energy_mask == 0] = (53, 122, 201)
+        frame[19:39, 558:601] = (225, 242, 255)
+        cv2.putText(frame, "3", (569, 34), cv2.FONT_HERSHEY_SIMPLEX, .55, (35, 50, 65), 2)
+        self.assertEqual(ui.hud(frame).energy, 3)
+        patch[:] = (53, 122, 201)
+        self.assertIsNone(ui.hud(frame))
+
     def test_catch_panel_without_readable_title_needs_close_anchor(self) -> None:
         ui = Interface()
         frame = self.frame.copy()

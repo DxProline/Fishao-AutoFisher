@@ -148,9 +148,21 @@ def casting_target(image: Image, preferred: Point | None = None, avoid: Point | 
         dx, dy = xx - cx, yy - cy
         range_sq = dx ** 2 + dy ** 2
         survey = range_sq <= (radius * 1.12) ** 2
-        ys, xs = np.nonzero(survey & water)
-        if len(xs) < np.count_nonzero(survey) * .10:
+        area = np.count_nonzero(survey)
+        available = (survey & water).astype(np.uint8)
+        # Na molu může být voda na obou stranách. Vybereme jen nejbližší
+        # dostatečně velkou souvislou plochu, pokud strany nejsou stejně blízko.
+        count, labels, stats, _ = cv2.connectedComponentsWithStats(available)
+        candidates = []
+        for label in range(1, count):
+            if stats[label, cv2.CC_STAT_AREA] >= area * .10:
+                surface = labels == label
+                candidates.append((float(range_sq[surface].min()) ** .5, surface))
+        candidates.sort(key=lambda item: item[0])
+        if not candidates or len(candidates) > 1 and candidates[1][0] - candidates[0][0] < radius * .15:
             return None
+        surface = candidates[0][1]
+        ys, xs = np.nonzero(surface)
         # Osa vede od postavy k převaze souvislé vody. Za její zadní polorovinu se nekliká.
         vx, vy = float(xs.mean() - cx), float(ys.mean() - cy)
         length = float(np.hypot(vx, vy))
@@ -159,11 +171,11 @@ def casting_target(image: Image, preferred: Point | None = None, avoid: Point | 
         forward = (dx * vx + dy * vy) / length
         front_band = survey & (forward > radius * .25)
         back_band = survey & (forward < -radius * .25)
-        if back_band.any() and float(water[back_band].mean()) > .28:
+        if back_band.any() and float(surface[back_band].mean()) > .28:
             return None
-        if not front_band.any() or float(water[front_band].mean()) < .43:
+        if not front_band.any() or float(surface[front_band].mean()) < .43:
             return None
-        eligible = (water & (range_sq <= (radius * .85) ** 2) & (forward >= radius * .22)).astype(np.uint8)
+        eligible = (surface & (range_sq <= (radius * .85) ** 2) & (forward >= radius * .22)).astype(np.uint8)
         distance = cv2.distanceTransform(eligible, cv2.DIST_L2, 3)
         _, deep, _, (x, y) = cv2.minMaxLoc(distance)
         margin = max(8, radius * .075)

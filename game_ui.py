@@ -49,6 +49,10 @@ class Interface:
         self.templates = {key: self._image(ROOT / f"{key}.png") for key in
                           ("energy", "rod", "bait", "inventory", "select", "select_hover",
                            "caught", "escaped", "fishdex_button", "result_x")}
+        # Porovnáváme vnitřek blesku. Okraje obsahují průhledné pozadí mapy.
+        lightning = cv2.cvtColor(self.templates["energy"], cv2.COLOR_BGR2HSV)
+        self.energy_mask = cv2.erode(cv2.inRange(lightning, (75, 125, 130), (110, 255, 255)),
+                                     np.ones((3, 3), np.uint8))
         self.digits: dict[int, list[np.ndarray]] = {number: [] for number in range(10)}
         for file in ROOT.glob("digit_*.png"):
             digit = int(file.stem.split("_")[1])
@@ -127,16 +131,20 @@ class Interface:
         return match.point(width // 2, height // 2)
 
     def hud(self, image: Image) -> Hud | None:
-        energy = self._find(image,"energy",(450,0,640,74),.73)
+        values = cv2.matchTemplate(image[:74, 450:640], self.templates["energy"],
+                                   cv2.TM_SQDIFF_NORMED, mask=self.energy_mask)
+        values[~np.isfinite(values)] = np.inf
+        error, _, (energy_x, energy_y), _ = cv2.minMaxLoc(values)
         rod = self._find(image,"rod",(1070,280,1264,392),.78)
         bait = self._find(image,"bait",(1070,396,1264,519),.78)
-        if not (energy and rod and bait):
+        if error > .06 or rod is None or bait is None:
             return None
         # Barevné záhlaví ROD zšedne, dokud hráč čeká na záběr.
         cell = image[rod.y+4:rod.y+11,rod.x+8:rod.x+23]
         hsv = cv2.cvtColor(cell,cv2.COLOR_BGR2HSV)
         ready = float(hsv[:,:,1].mean()) >= 100 and float(hsv[:,:,2].mean()) >= 160
-        e = self.number(image[energy.y+11:energy.y+31,energy.x+55:energy.x+98],white=False)
+        energy_x += 450
+        e = self.number(image[energy_y+11:energy_y+31,energy_x+55:energy_x+98],white=False)
         r = self.number(image[rod.y+76:rod.y+93,rod.x+44:rod.x+79],white=True)
         b = self.number(image[bait.y+76:bait.y+93,bait.x+44:bait.x+79],white=True)
         return Hud(e,r,b,ready,rod.point(50,48),bait.point(50,48))

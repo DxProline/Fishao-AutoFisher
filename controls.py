@@ -102,18 +102,22 @@ class Controls:
                 and abs(py - (region.y + int(y * region.height))) <= 2)
 
     def click(self, region: Region, x: float, y: float) -> bool:
-        move = self._pointer_move(region, x, y)
-        if move is None:
+        if not self.pointer_at(region, x, y):
+            if not self.hover(region, x, y):
+                return False
+            sleep(.02)
+        if self._pointer_move(region, x, y) is None or not self.pointer_at(region, x, y):
             return False
         down = NativeInput(0, InputValue(mouse=MouseInput(0, 0, 0, 0x0002, 0, 0)))
         up = NativeInput(0, InputValue(mouse=MouseInput(0, 0, 0, 0x0004, 0, 0)))
         if win32gui.GetForegroundWindow() != region.hwnd:
             return False
         try:
-            self._inputs(move, down, up)
-        except OSError:
+            self._inputs(down)
+            # Hra musí dostat stisk a uvolnění v různých snímcích.
+            sleep(.055)
+        finally:
             self._inputs(up)
-            raise
         return True
 
     def escape(self, hwnd: int) -> bool:
