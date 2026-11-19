@@ -16,16 +16,14 @@ def main() -> None:
     parser.add_argument("--assist", action="store_true", help="Spustí asistenci jedné minihry.")
     parser.add_argument("--autofish", "--auto", dest="autofish", action="store_true",
                         help="Spustí AutoFish, který loví do ručního vypnutí.")
-    parser.add_argument("--max-casts", type=int, choices=range(1,501), metavar="1-500",
-                        help="Volitelný limit pro krátký test AutoFish.")
+    parser.add_argument("--xp-farm", action="store_true",
+                        help="Spustí nepřetržitý lov v režimu XP Farm.")
     parser.add_argument("--test-cast", action="store_true", help="S asistencí umožní jeden zkušební klik do vody.")
     args = parser.parse_args()
     if args.test_cast and not args.assist:
         parser.error("--test-cast vyžaduje --assist")
-    if args.assist and args.autofish:
-        parser.error("Zvol --assist nebo --autofish.")
-    if args.max_casts is not None and not args.autofish:
-        parser.error("--max-casts vyžaduje --autofish.")
+    if args.assist and (args.autofish or args.xp_farm):
+        parser.error("Zvol --assist, --autofish nebo --xp-farm.")
 
     # Win32, Tkinter i MSS musí používat fyzické souřadnice při škálování Windows.
     try:
@@ -41,7 +39,7 @@ def main() -> None:
         from gui import App
 
         App(root, args.output_dir.resolve(), args.fps, assist=args.assist, cast_once=args.test_cast,
-            autofish=args.autofish, auto_casts=args.max_casts, image_format=args.image_format)
+            autofish=args.autofish or args.xp_farm, xp_farm=args.xp_farm, image_format=args.image_format)
     except Exception as exc:
         root.withdraw()
         messagebox.showerror("Fishao Záznamník", f"Aplikaci nelze otevřít.\n{exc}", parent=root)

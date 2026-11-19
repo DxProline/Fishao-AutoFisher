@@ -35,7 +35,7 @@ class GuiLog(logging.Handler):
 
 class App:
     def __init__(self, root: tk.Tk, output_dir: Path, fps: int, *, assist: bool = False,
-                 cast_once: bool = False, autofish: bool = False, auto_casts: int | None = None,
+                 cast_once: bool = False, autofish: bool = False, xp_farm: bool = False,
                  image_format: str = "jpg") -> None:
         self.root = root
         self.output_dir = output_dir
@@ -44,10 +44,10 @@ class App:
         self.recorder: Recorder | Assist | None = None
         self.assist = assist
         self.cast_once = cast_once
-        self.auto_casts = auto_casts
+        self.xp_farm = xp_farm
         self.autofish = autofish
-        self.action_name = "AutoFish" if autofish else "asistenci" if assist else "záznam"
-        self.title = "Fishao AutoFish" if autofish else "Fishao Asistence" if assist else "Fishao Záznamník"
+        self.action_name = ("XP Farm" if xp_farm else "AutoFish") if autofish else "asistenci" if assist else "záznam"
+        self.title = f"Fishao {self.action_name}" if autofish else "Fishao Asistence" if assist else "Fishao Záznamník"
         self.closing = False
         self.actions: SimpleQueue[str] = SimpleQueue()
         self.messages: SimpleQueue[str] = SimpleQueue()
@@ -116,7 +116,7 @@ class App:
         ttk.Button(bar, text="Otevřít složku", command=self.open_folder).pack(side="left")
         mode = ("1 zkušební hod" if self.cast_once else "Ruční nahození") if self.assist else f"Cíl {self.fps} sn./s"
         if self.autofish:
-            mode = f"Limit nahození · {self.auto_casts}" if self.auto_casts is not None else "Do ručního vypnutí"
+            mode = "Do ručního vypnutí"
         ttk.Label(bar, text=mode, style="Muted.TLabel").pack(side="right")
 
         cards = ttk.Frame(shell)
@@ -202,7 +202,7 @@ class App:
             self.canvas.itemconfigure(self.canvas_image, image="")
             self.canvas.itemconfigure(self.canvas_message, state="normal")
             if self.autofish:
-                self.recorder = Auto(self.auto_casts)
+                self.recorder = Auto(xp_farm=self.xp_farm)
             else:
                 self.recorder = Assist(self.cast_once) if self.assist else Recorder(
                     self.output_dir, self.fps, image_format=self.image_format)

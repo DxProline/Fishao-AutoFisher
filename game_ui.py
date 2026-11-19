@@ -28,7 +28,7 @@ class Hud:
     energy: int | None
     rod: int | None
     bait: int | None
-    ready: bool
+    ready: bool | None
     rod_button: Point
     bait_button: Point
 
@@ -44,11 +44,21 @@ class Inventory:
     page: tuple[int, int] | None
 
 
+@dataclass(frozen=True, slots=True)
+class EnergyShop:
+    balance: int | None
+    price: int | None
+    energy: int | None
+    buy: Point | None
+    close: Point | None
+
+
 class Interface:
     def __init__(self) -> None:
         self.templates = {key: self._image(ROOT / f"{key}.png") for key in
                           ("energy", "rod", "bait", "inventory", "select", "select_hover",
-                           "caught", "escaped", "fishdex_button", "result_x")}
+                           "caught", "escaped", "fishdex_button", "result_x", "energy_plus",
+                           "energy_shop", "energy_cash", "energy_price_cash", "energy_offer_five")}
         # Porovnáváme vnitřek blesku. Okraje obsahují průhledné pozadí mapy.
         lightning = cv2.cvtColor(self.templates["energy"], cv2.COLOR_BGR2HSV)
         self.energy_mask = cv2.erode(cv2.inRange(lightning, (75, 125, 130), (110, 255, 255)),
@@ -76,7 +86,7 @@ class Interface:
         x, y, w, h = cv2.boundingRect(points)
         return cv2.resize(mask[y:y+h, x:x+w], (12, 18), interpolation=cv2.INTER_AREA) / 255.0
 
-    def number(self, patch: Image, *, white: bool) -> int | None:
+    def number(self, patch: Image, *, white: bool, max_digits: int = 3) -> int | None:
         if min(patch.shape[:2]) < 3:
             return None
         gray = cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY)
@@ -92,7 +102,7 @@ class Interface:
             if scores[0][0] > .29 or scores[1][0] - scores[0][0] < .018:
                 return None
             found.append((x, scores[0][1]))
-        if not 1 <= len(found) <= 3:
+        if not 1 <= len(found) <= max_digits:
             return None
         return int("".join(str(digit) for _, digit in sorted(found)))
 
@@ -130,6 +140,44 @@ class Interface:
         height, width = self.templates["result_x"].shape[:2]
         return match.point(width // 2, height // 2)
 
+    def energy_button(self, image: Image) -> Point | None:
+        match = self._find(image, "energy_plus", (596, 12, 634, 46), .85)
+        return match.point(9, 10) if match else None
+
+    def energy_shop(self, image: Image) -> EnergyShop | None:
+        if self._find(image, "energy_shop", (430, 79, 830, 149), .88) is None:
+            return None
+        funds = self._find(image, "energy_cash", (632, 538, 705, 590), .86)
+        button = self._find(image, "energy_price_cash", (803, 156, 866, 211), .86)
+        offer = self._find(image, "energy_offer_five", (385, 156, 525, 211), .88)
+        close = self._find(image, "result_x", (932, 73, 981, 116), .83)
+        balance = self.number(image[555:580, 690:763], white=False, max_digits=6) if funds else None
+        price = self.number(image[172:197, 863:910], white=True) if button else None
+        # Nabídka ztmaví počítadlo. Zvýšíme kontrast políčka s energií.
+        energy_cell = image[19:39, 558:601]
+        energy = self.number(cv2.convertScaleAbs(energy_cell, alpha=1.45), white=False)
+        return EnergyShop(balance, price, energy, button.point(69, 18) if button and offer else None,
+                          close.point(13, 13) if close else None)
+
+    @staticmethod
+    def fishing_ready(image: Image, rod: Match, bait: Match) -> bool | None:
+        # Košík, batoh a žebříček ztrácejí barvy během nahození i minihry.
+        toolbar = cv2.cvtColor(image[628:655, 441:763], cv2.COLOR_BGR2HSV)
+        colored = grey = 0
+        for left, top, right, bottom in ((0, 3, 20, 24), (63, 0, 83, 24), (295, 8, 322, 27)):
+            hue, saturation, value = np.moveaxis(toolbar[top:bottom, left:right], 2, 0)
+            colored += np.mean((hue >= 35) & (saturation >= 80) & (value >= 65)) >= .35
+            grey += np.mean((saturation <= 42) & (value >= 65)) >= .55
+        labels = []
+        for match in (rod, bait):
+            header = image[match.y+4:match.y+11, match.x+8:match.x+23]
+            labels.append(float(cv2.cvtColor(header, cv2.COLOR_BGR2HSV)[:, :, 1].mean()))
+        if grey >= 2 or max(labels) <= 55:
+            return False
+        if colored >= 2 and min(labels) >= 100:
+            return True
+        return None
+
     def hud(self, image: Image) -> Hud | None:
         values = cv2.matchTemplate(image[:74, 450:640], self.templates["energy"],
                                    cv2.TM_SQDIFF_NORMED, mask=self.energy_mask)
@@ -139,10 +187,7 @@ class Interface:
         bait = self._find(image,"bait",(1070,396,1264,519),.78)
         if error > .06 or rod is None or bait is None:
             return None
-        # Barevné záhlaví ROD zšedne, dokud hráč čeká na záběr.
-        cell = image[rod.y+4:rod.y+11,rod.x+8:rod.x+23]
-        hsv = cv2.cvtColor(cell,cv2.COLOR_BGR2HSV)
-        ready = float(hsv[:,:,1].mean()) >= 100 and float(hsv[:,:,2].mean()) >= 160
+        ready = self.fishing_ready(image, rod, bait)
         energy_x += 450
         e = self.number(image[energy_y+11:energy_y+31,energy_x+55:energy_x+98],white=False)
         r = self.number(image[rod.y+76:rod.y+93,rod.x+44:rod.x+79],white=True)

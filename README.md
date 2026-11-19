@@ -70,7 +70,15 @@ Před startem postav postavu u vody, zobraz kruh dosahu a ověř energii, prut a
 1. Postav postavu k vodě, připrav prut a návnadu a zobraz kruh dosahu. Zavři otevřené nabídky a staré výsledky.
 2. Spusť automat tlačítkem nebo **F8**. Okno hry ponech v popředí. **F8** pozastaví práci a **F9** ukončí relaci.
 3. AutoFish potvrdí hod z obrazu, vyčká na záběr, vyváží minihru a zavře rozpoznaný výsledek přes Esc. Pro další hod změří aktuální kruh dosahu kolem postavy s fialovou čepicí. Klikne jen do souvislé vody na straně od břehu, s odstupem od okraje kruhu. Střed, poloměr i bod musí potvrdit dva snímky. Při nejasném kruhu nebo břehu vyčká. Při nulové energii čeká na zvýšení čítače. Vyčerpanou výbavu zkusí doplnit.
-4. AutoFish běží do ručního vypnutí pomocí **F9**. Volitelný parametr `--max-casts 2` se hodí pro krátký test.
+4. AutoFish běží do ručního vypnutí pomocí **F9**. Šedé spodní ikony nebo šedá záhlaví prutu a návnady znamenají čekání. Po návratu barev obou lišt může přijít další hod, i když předchozí skončil bez úlovku.
+
+### XP Farm
+
+```powershell
+& $python .\main.py --xp-farm
+```
+
+XP Farm při nulové energii zkontroluje herní obchod a vezme ověřený balíček 5 energie za 35 herních bankovek, pokud stačí zůstatek. Jinak zavře nabídku a pokračuje po přirozeném dobití. **F8** spustí nebo pozastaví lov a **F9** ho ukončí. Při ztrátě fokusu nebo nečitelném stavu hry automat čeká a průběžně kontroluje obraz.
 
 Pohyb postavy k vodě zajišťuje hráč. Hra a automat musí mít stejnou úroveň oprávnění Windows. Rozpoznávání bylo ověřené na skutečných snímcích úlovku, úniku a inventáře. Průchod AutoFish a rychlé změny směru byly testované simulací. Celý automatický průchod ve hře je třeba ověřit prvním hlídaným spuštěním. Probíhající hod může skončit i bez úlovku. AutoFish se řídí stavem hry a při nejasném obraze vyčkává.
 

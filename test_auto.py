@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 
 from bot import Auto, Cycle, Phase
-from game_ui import Hud, Interface, Inventory, SIZE
+from game_ui import EnergyShop, Hud, Interface, Inventory, Match, SIZE
 from minigame import Balance, BalancePolicy
 from spots import CastTarget
 from window import Region
@@ -16,7 +16,7 @@ from window import Region
 
 class AutoTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.auto = Auto(2)
+        self.auto = Auto()
         self.cycle = Cycle()
         self.region = Region(1,0,0,*SIZE)
         self.controls = Mock()
@@ -142,6 +142,48 @@ class AutoTest(unittest.TestCase):
         cycle.advance(Phase.WAIT,2.)
         self.assertEqual(cycle.retries,0)
 
+    def test_bottom_toolbar_blocks_cast_even_if_right_panel_is_colored(self) -> None:
+        frame = self.frame.copy()
+        rod, bait = Match(1151, 328, 1), Match(1151, 448, 1)
+        for match in (rod, bait):
+            frame[match.y+4:match.y+11, match.x+8:match.x+23] = (20, 115, 235)
+        rectangles = ((441, 631, 461, 652), (504, 628, 524, 652), (736, 636, 763, 655))
+        self.assertIsNone(Interface.fishing_ready(frame, rod, bait))
+        for x, y, r, b in rectangles:
+            frame[y:b, x:r] = (120, 120, 120)
+        self.assertIs(Interface.fishing_ready(frame, rod, bait), False)
+        for x, y, r, b in rectangles:
+            frame[y:b, x:r] = (155, 45, 165)
+        self.assertIs(Interface.fishing_ready(frame, rod, bait), True)
+        frame[332:339, 1159:1174] = frame[452:459, 1159:1174] = (125, 125, 125)
+        self.assertIs(Interface.fishing_ready(frame, rod, bait), False)
+
+    def test_refill_confirms_quote_and_sends_one_purchase(self) -> None:
+        auto = Auto(xp_farm=True)
+        cycle = Cycle(phase=Phase.REFILL)
+        buy, close = (.70, .27), (.76, .13)
+        shop = EnergyShop(35, 35, 0, buy, close)
+        auto._refill(cycle, shop, False, 1., self.controls, self.region)
+        self.controls.click.assert_not_called()
+        auto._refill(cycle, shop, False, 2., self.controls, self.region)
+        self.controls.click.assert_called_once_with(self.region, *buy)
+        auto._refill(cycle, shop, False, 4., self.controls, self.region)
+        self.controls.click.assert_called_with(self.region, *close)
+        auto._refill(cycle, None, True, 5., self.controls, self.region)
+        self.assertEqual(cycle.phase, Phase.ENERGY)
+
+    def test_refill_closes_when_balance_energy_or_price_is_not_confirmed(self) -> None:
+        auto = Auto(xp_farm=True)
+        buy, close = (.70, .27), (.76, .13)
+        for balance, price, energy in ((34, 35, 0), (None, 35, 0), (40, 30, 0), (40, 35, 1), (40, 35, None)):
+            with self.subTest(balance=balance, price=price, energy=energy):
+                self.controls.reset_mock()
+                cycle = Cycle(phase=Phase.REFILL)
+                shop = EnergyShop(balance, price, energy, buy, close)
+                auto._refill(cycle, shop, False, 1., self.controls, self.region)
+                auto._refill(cycle, shop, False, 2., self.controls, self.region)
+                self.controls.click.assert_called_once_with(self.region, *close)
+
     def test_autofish_recasts_after_long_wait_and_after_result(self) -> None:
         auto = Auto()
         ready, busy, balance, caught = range(4)
@@ -169,7 +211,7 @@ class AutoTest(unittest.TestCase):
             def hud(self, image):
                 state = image[0, 0, 0]
                 if state in (ready, busy):
-                    return Hud(8 if state == ready else 7, 20, 20, state == ready, position, position)
+                    return Hud(8 if state == ready else 7, 20, 20, bool(state == ready), position, position)
                 return None
 
         class Detector:
