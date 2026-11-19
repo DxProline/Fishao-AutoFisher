@@ -88,7 +88,9 @@ Na rozpoznané placené Trout Farm agent upřednostňuje rybaření. Při nulov�
 & $python .\main.py --agent
 ```
 
-Před spuštěním lovu zapni **Agent · postup, vybavení a mise**. Příkaz `--agent` tuto volbu předvybere. Po sérii málo úspěšných hodů umí zkusit přechod na Trout Farm. Rozpoznaná mise na čtyřhvězdičkovou rybu zkracuje dobu před porovnáním výsledků na stávajícím místě. Při chybějícím prutu nebo návnadě nejdřív projde inventář a teprve potom hledá ověřenou nabídku v obchodě. Porovnává ceny prutů a drží rezervu 30 bankovek. Při opakovaném úniku ryb prověří vlasec a po případném upgradu ponechá rezervu 5 mincí. Turnaje kontroluje nejvýše jednou za pět minut. Při neověřené registraci zavře panel a vrátí se k lovu.
+Před spuštěním lovu zapni **Agent · postup, vybavení a mise**. Příkaz `--agent` tuto volbu předvybere. Po sérii málo úspěšných hodů umí zkusit přechod na Trout Farm. Rozpoznaná mise na čtyřhvězdičkovou rybu zkracuje dobu před porovnáním výsledků na stávajícím místě. Při chybějícím prutu nebo návnadě nejdřív projde inventář a teprve potom hledá ověřenou nabídku v obchodě. Porovnává ceny prutů a drží rezervu 30 bankovek. Při opakovaném úniku ryb prověří vlasec a po případném upgradu ponechá rezervu 5 mincí.
+
+Volba **Automaticky se účastnit turnajů** je při otevření aplikace vypnutá. Zaškrtni ji před spuštěním lovu, pokud chceš turnaje vyhledávat a hlásit se za herní mince. Agent turnaje kontroluje nejvýše jednou za pět minut. Při neověřené registraci zavře panel a vrátí se k lovu. Pro změnu volby během lovu zastav agenta klávesou F9 a po změně ho znovu spusť.
 
 Při lovu se bod vybírá z vody uvnitř aktuálního kruhu prutu. Když hra hod nepotvrdí, automat zkusí další rozpoznaný bod. Při nejistém dosahu přejíždí kurzorem nad vodou a čeká na potvrzený kruh. AutoFish a agent drží průběžný náhled v paměti. Základní režim záznamníku je určený pro ruční ukládání snímků.
 

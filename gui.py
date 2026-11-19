@@ -47,6 +47,7 @@ class App:
         self.cast_once = cast_once
         self.xp_farm = xp_farm
         self.agent = tk.BooleanVar(master=root, value=agent)
+        self.join_tournaments = tk.BooleanVar(master=root, value=False)
         self.background = tk.BooleanVar(master=root, value=False)
         self.autofish = autofish
         self.action_name = ("XP Farm" if xp_farm else "AutoFish") if autofish else "asistenci" if assist else "záznam"
@@ -130,8 +131,14 @@ class App:
         ttk.Label(bar, text=mode, style="Muted.TLabel").pack(side="right")
         if self.autofish:
             self.agent_option = ttk.Checkbutton(shell, text="Agent · postup, vybavení a mise",
-                                                variable=self.agent, style="Options.TCheckbutton")
-            self.agent_option.pack(anchor="w", pady=(0, 10))
+                                                variable=self.agent, style="Options.TCheckbutton",
+                                                command=self._buttons)
+            self.agent_option.pack(anchor="w")
+            self.tournament_option = ttk.Checkbutton(
+                shell, text="Automaticky se účastnit turnajů", variable=self.join_tournaments,
+                style="Options.TCheckbutton",
+            )
+            self.tournament_option.pack(anchor="w", padx=(20, 0), pady=(0, 10))
             self.background_option = ttk.Checkbutton(shell, text="Pracovat v překrytém okně hry",
                                                      variable=self.background, style="Options.TCheckbutton",
                                                      command=self._update_preview_hint)
@@ -215,6 +222,7 @@ class App:
                                    state="normal" if active and not stopping else "disabled")
         if self.autofish:
             self.agent_option.configure(state="disabled" if active else "normal")
+            self.tournament_option.configure(state="disabled" if active or not self.agent.get() else "normal")
             self.background_option.configure(state="disabled" if active else "normal")
 
     def toggle(self) -> None:
@@ -230,7 +238,8 @@ class App:
             self.canvas.itemconfigure(self.canvas_message, state="normal")
             if self.autofish:
                 self.recorder = Auto(xp_farm=self.xp_farm, agent=self.agent.get(),
-                                     background=self.background.get())
+                                     background=self.background.get(),
+                                     join_tournaments=self.join_tournaments.get())
             else:
                 self.recorder = Assist(self.cast_once) if self.assist else Recorder(
                     self.output_dir, self.fps, image_format=self.image_format)

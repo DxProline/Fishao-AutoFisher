@@ -98,15 +98,16 @@ class Auto(Assist):
     """Opakování ověřených akcí nad obrazem hry, v samostatném vlákně."""
 
     def __init__(self, *, xp_farm: bool = False, agent: bool = False,
-                 background: bool = False) -> None:
+                 background: bool = False, join_tournaments: bool = False) -> None:
         super().__init__(background=background)
         self.xp_farm = xp_farm
         self.name = "Agent Fishao" if agent else "XP Farm" if xp_farm else "AutoFish"
         self.agent = agent
+        self.join_tournaments = join_tournaments
 
     def _loop(self, capture: WindowCapture, controls: Controls) -> str:
         ui, detector, policy = Interface(), BalanceDetector(), BalancePolicy()
-        activities = Activities(ui) if self.agent else None
+        activities = Activities(ui, join_tournaments=self.join_tournaments) if self.agent else None
         progression = Progression(ui) if self.agent else None
         cycle = Cycle()
         crop: PixelBox | None = None

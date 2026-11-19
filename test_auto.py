@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 import win32con
 
-from activities import Activities, Panel
+from activities import Action, Activities, Panel
 from bot import Auto, Cycle, Phase
 from controls import BackgroundControls
 from game_ui import EnergyShop, Hud, Interface, Inventory, Match, SIZE
@@ -185,11 +185,44 @@ class AutoTest(unittest.TestCase):
             tile = ui.templates[key]
             h, w = tile.shape[:2]
             self.frame[y:y+h, x:x+w] = tile
-        agent = Activities(ui)
+        agent = Activities(ui, join_tournaments=True)
         agent.tick(self.frame, False, 1., self.controls, self.region)
         self.controls.click.assert_not_called()
         agent.tick(self.frame, False, 2., self.controls, self.region)
         self.controls.click.assert_called_once_with(self.region, 986 / SIZE[0], 67 / SIZE[1])
+
+    def test_tournament_icon_requires_opt_in(self) -> None:
+        ui = Interface()
+        tile = ui.templates["tournament_icon"]
+        h, w = tile.shape[:2]
+        self.frame[620:620+h, 603:603+w] = tile
+
+        default = Activities(ui)
+        for now in (31., 32.):
+            self.assertIsNone(default.tick(self.frame, True, now, self.controls, self.region))
+        self.controls.click.assert_not_called()
+
+        enabled = Activities(ui, join_tournaments=True)
+        for now in (31., 32.):
+            self.assertEqual(enabled.tick(self.frame, True, now, self.controls, self.region), "Otevřít turnaj")
+        self.controls.click.assert_called_once_with(self.region, 620 / SIZE[0], 635 / SIZE[1])
+
+    def test_open_tournament_respects_opt_in_even_if_signup_is_available(self) -> None:
+        ui = Interface()
+        for key, x, y in (("tournament_podium", 548, 310), ("tournament_start", 309, 541)):
+            tile = ui.templates[key]
+            h, w = tile.shape[:2]
+            self.frame[y:y+h, x:x+w] = tile
+        signup = Action("Přihlásit herní turnaj", (.72, .8))
+        with patch.object(Activities, "_signup", return_value=signup) as eligible:
+            for enabled in (False, True):
+                agent = Activities(ui, join_tournaments=enabled)
+                for now in (31., 32.):
+                    agent.tick(self.frame, False, now, self.controls, self.region)
+                if not enabled:
+                    eligible.assert_not_called()
+                    self.controls.click.assert_not_called()
+        self.controls.click.assert_called_once_with(self.region, *signup.point)
 
     def test_agent_chooses_an_affordable_rod_and_preserves_reserve(self) -> None:
         ui = Interface()

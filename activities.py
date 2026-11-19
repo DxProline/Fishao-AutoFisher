@@ -26,8 +26,9 @@ class Action:
 class Activities:
     """Kontroluje známé herní panely mezi hody."""
 
-    def __init__(self, ui: Interface) -> None:
+    def __init__(self, ui: Interface, *, join_tournaments: bool = False) -> None:
         self.ui = ui
+        self.join_tournaments = join_tournaments
         self.log = logging.getLogger("fishao")
         self.due = {Panel.MISSIONS: 0., Panel.TOURNAMENT: 30.}
         self.last_mission_catch = -8
@@ -50,6 +51,9 @@ class Activities:
             find(image, "tournament_podium", (530, 297, 745, 357), .88) is not None
             and find(image, "tournament_start", (295, 526, 537, 580), .88) is not None
         )
+        if tournament and not self.join_tournaments:
+            self.reset_observation()
+            return "Otevřený turnaj čeká na ruční ovládání."
         watching = missions is not None or tournament or now < self.opening_until
         if not watching and not ready:
             self.reset_observation()
@@ -84,6 +88,8 @@ class Activities:
                 (Panel.MISSIONS, "missions_icon", (0, 180, 84, 279), (22, 20)),
                 (Panel.TOURNAMENT, "tournament_icon", (590, 604, 658, 666), (17, 15)),
             ):
+                if panel is Panel.TOURNAMENT and not self.join_tournaments:
+                    continue
                 if now < self.due[panel]:
                     continue
                 if panel is Panel.MISSIONS and caught < self.last_mission_catch + 8:
