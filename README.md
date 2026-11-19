@@ -1,4 +1,4 @@
-# Fishao | automat, záznam a offline rozbor
+# Fishao AutoFisher
 
 Windows 11, 64bitový CPython 3.14. Balíček obsahuje záznamník, offline přehrávač, asistenci a automat opakovaného lovu z připraveného místa u vody.
 
@@ -73,4 +73,3 @@ Před startem postav postavu u vody, zobraz kruh dosahu a ověř energii, prut a
 Pohyb postavy k vodě zajišťuje hráč. Hra a automat musí mít stejnou úroveň oprávnění Windows. Rozpoznávání bylo ověřené na skutečných snímcích úlovku, úniku a inventáře. Průchod AutoFish a rychlé změny směru byly testované simulací. Celý automatický průchod ve hře je třeba ověřit prvním hlídaným spuštěním. Probíhající hod může skončit i bez úlovku. AutoFish se řídí stavem hry a při nejasném obraze vyčkává.
 
 Testy balíčku spusť příkazem `& $python -B -m unittest -v`.
-
