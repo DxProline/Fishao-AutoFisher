@@ -139,6 +139,26 @@ class AutoTest(unittest.TestCase):
             self.assertEqual(ref.result(ref.normalize(resized)),label)
         self.assertIsNone(ref.result(self.frame))
 
+    def test_equipment_count_separates_touching_digits(self) -> None:
+        levels = {".": 90, "+": 228, "#": 245}
+        gray = np.array([[levels[pixel] for pixel in row] for row in (
+            "................",
+            ".....#+...####..",
+            "....###..####...",
+            "....#.#..##.....",
+            "...#.+#..####...",
+            "..+#.+#..#..##..",
+            "..#+.##.....##..",
+            "..######....##..",
+            ".....+#.+#+##+..",
+            "......#..####...",
+            "................",
+        )], dtype=np.uint8)
+        ui = Interface()
+        patch_image = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        self.assertIsNone(ui.number(patch_image, white=True))
+        self.assertEqual(ui._gear_count(patch_image), 45)
+
     def test_energy_anchor_ignores_background_behind_lightning(self) -> None:
         ui = Interface()
         frame = self.frame.copy()

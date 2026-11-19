@@ -93,11 +93,11 @@ class Interface:
         x, y, w, h = cv2.boundingRect(points)
         return cv2.resize(mask[y:y+h, x:x+w], (12, 18), interpolation=cv2.INTER_AREA) / 255.0
 
-    def number(self, patch: Image, *, white: bool, max_digits: int = 3) -> int | None:
+    def number(self, patch: Image, *, white: bool, max_digits: int = 3, white_floor: int = 219) -> int | None:
         if min(patch.shape[:2]) < 3:
             return None
         gray = cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY)
-        mask = cv2.inRange(gray, 219, 255) if white else cv2.inRange(gray, 0, 127)
+        mask = cv2.inRange(gray, white_floor, 255) if white else cv2.inRange(gray, 0, 127)
         _, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
         found = []
         for i, (x,y,w,h,area) in enumerate(stats[1:], 1):
@@ -185,6 +185,11 @@ class Interface:
             return True
         return None
 
+    def _gear_count(self, patch: Image) -> int | None:
+        count = self.number(patch, white=True)
+        # Vyšší práh oddělí sousední bílé číslice spojené vyhlazenou hranou.
+        return count if count is not None else self.number(patch, white=True, white_floor=235)
+
     def hud(self, image: Image) -> Hud | None:
         values = cv2.matchTemplate(image[:74, 450:640], self.templates["energy"],
                                    cv2.TM_SQDIFF_NORMED, mask=self.energy_mask)
@@ -197,8 +202,8 @@ class Interface:
         ready = self.fishing_ready(image, rod, bait)
         energy_x += 450
         e = self.number(image[energy_y+11:energy_y+31,energy_x+55:energy_x+98],white=False)
-        r = self.number(image[rod.y+76:rod.y+93,rod.x+44:rod.x+79],white=True)
-        b = self.number(image[bait.y+76:bait.y+93,bait.x+44:bait.x+79],white=True)
+        r = self._gear_count(image[rod.y+76:rod.y+93,rod.x+44:rod.x+79])
+        b = self._gear_count(image[bait.y+76:bait.y+93,bait.x+44:bait.x+79])
         if b is None and self._find(image, "empty_hook", (1163, 462, 1251, 550), .90):
             b = 0
         return Hud(e,r,b,ready,rod.point(50,48),bait.point(50,48))

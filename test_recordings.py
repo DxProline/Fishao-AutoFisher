@@ -185,6 +185,25 @@ class RecordedWorkflow(unittest.TestCase):
                 frame[:, :center[0]] = scene[:, :center[0]]
                 self.assertIsNone(casting_target(frame))
 
+    def test_large_circle_survives_partial_hat_detection(self) -> None:
+        width, height = 900, 485
+        center = (455, 117)
+        yy, xx = np.ogrid[:height, :width]
+        water = xx > 468 - .85 * (yy - center[1])
+        scene = np.full((height, width, 3), (16, 160, 78), np.uint8)
+        scene[water] = (216, 135, 8)
+        cv2.circle(scene, (460, 86), 6, (158, 37, 97), -1)
+        self.assertIsNone(casting_target(scene))
+        rim = np.zeros((height, width), np.uint8)
+        cv2.circle(rim, center, 356, 255, 2, cv2.LINE_AA)
+        alpha = .08 * rim[:, :, None] / 255
+        frame = np.rint(scene * (1 - alpha) + 255 * alpha).astype(np.uint8)
+        target = casting_target(frame)
+        self.assertIsNotNone(target)
+        x, y = round(target.point[0] * width), round(target.point[1] * height)
+        self.assertTrue(water[y, x])
+        self.assertAlmostEqual(target.radius * width, 356, delta=4)
+
     def test_pier_uses_only_the_nearest_side_of_the_water(self) -> None:
         scene = np.full((550, 760, 3), (207, 134, 20), np.uint8)
         scene[:, 308:414] = (55, 118, 185)
