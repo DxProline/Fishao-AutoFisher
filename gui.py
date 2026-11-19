@@ -15,6 +15,7 @@ from assist import Assist
 from bot import Auto
 from hotkeys import Hotkeys
 from recorder import NS, Recorder, Status
+from version import VERSION
 from window import Image
 
 BG = "#101e28"
@@ -112,6 +113,7 @@ class App:
 
         shell = ttk.Frame(self.root, padding=16)
         shell.pack(fill="both", expand=True)
+        ttk.Label(shell, text=f"Verze {VERSION}", style="Muted.TLabel").pack(anchor="w")
         ttk.Label(shell, text=self.title, style="Hero.TLabel").pack(anchor="w")
         ttk.Label(shell, textvariable=self.status, style="Status.TLabel", wraplength=620).pack(anchor="w", pady=(3, 9))
 

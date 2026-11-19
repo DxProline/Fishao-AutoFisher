@@ -11,7 +11,7 @@ from game_ui import Hud, Interface, Inventory, Point
 from minigame import BalanceDetector, BalancePolicy, PixelBox
 from progression import Progression
 from recorder import NS
-from spots import CastTarget, casting_hover, casting_target
+from spots import CastTarget, casting_hover, casting_target, shore_approach
 from window import FrameUnavailable, Image, Region, WindowCapture
 
 
@@ -43,6 +43,9 @@ class Cycle:
     next_scan: float = 0.
     next_hover: float = 0.
     hover_probe: int = 0
+    shore_step: Point | None = None
+    shore_moves: int = 0
+    next_step: float = 0.
     score: dict[Point, int] = field(default_factory=dict)
     gear: str | None = None
     gear_step: str = ""
@@ -59,6 +62,8 @@ class Cycle:
             self.casts += 1
             self.rejected.clear()
             self.hover_probe = 0
+            self.shore_moves = 0
+            self.shore_step = None
 
     def advance(self, phase: Phase, now: float, *, progress: bool = True) -> None:
         if self.phase != phase:
@@ -120,6 +125,7 @@ class Auto(Assist):
                 policy.choose(None)
                 self._tracking_times.clear()
                 cycle.candidate = None
+                cycle.shore_step = None
                 agreement, repetitions, ready_frames = None, 0, 0
                 last_tick = None
                 self._update(text="Pozastaveno. Pokračuj přes F8.", tracking_fps=None)
@@ -136,6 +142,7 @@ class Auto(Assist):
                 policy.choose(None)
                 self._tracking_times.clear()
                 cycle.candidate = None
+                cycle.shore_step = None
                 agreement, repetitions, ready_frames = None, 0, 0
                 crop = None
                 crop_misses = 0
@@ -162,6 +169,8 @@ class Auto(Assist):
                 cycle.candidate = None
                 crop_misses = 0
                 cycle.confirm_cast()
+                if cycle.phase is not Phase.BALANCE:
+                    self._log.info("Záběr rozpoznán. Řídím šipky podle ukazatele.")
                 cycle.advance(Phase.BALANCE, active)
                 last_seen = active
                 expected = (region.width,region.height)
@@ -201,6 +210,7 @@ class Auto(Assist):
                 stable = key is not None and repetitions >= 2
                 if key is None or (cycle.candidate is not None and not stable):
                     cycle.candidate = None
+                    cycle.shore_step = None
                 if self.stopping or self.paused:
                     continue
                 if cycle.phase is Phase.GEAR:
@@ -264,10 +274,14 @@ class Auto(Assist):
                 if not activity and cycle.phase in (Phase.READY, Phase.ENERGY) and busy:
                     cycle.advance(Phase.WAIT, active)
                 if not activity and cycle.phase in (Phase.READY,Phase.ENERGY) and stable and hud:
-                    self._ready(cycle,hud,frame,active,controls,region)
+                    shore_status = self._ready(cycle,hud,frame,active,controls,region)
+                    if shore_status:
+                        activity = shore_status
                 message = cycle.phase.value
                 if hud and cycle.phase in (Phase.READY, Phase.ENERGY, Phase.WAIT):
                     message += f" · energie {hud.energy if hud.energy is not None else '?'}"
+                if cycle.phase is Phase.WAIT:
+                    message += f" · {active - cycle.since:.0f} s od nahození"
                 if cycle.phase is Phase.READY and cycle.candidate is None and active < cycle.next_hover:
                     message += " · čekám na kruh dosahu nad vodou"
                 if cycle.phase is Phase.GEAR and cycle.gear_step == "unavailable":
@@ -309,10 +323,26 @@ class Auto(Assist):
         if hud.energy == 0:
             cycle.advance(Phase.ENERGY,now)
             return None
+        if now < cycle.next_step:
+            return "Přicházím k vodě. Čekám na zastavení postavy."
         if now >= cycle.next_scan:
             preferred = cycle.candidate.point if cycle.candidate else cycle.preferred()
             target = casting_target(frame, preferred, avoid=cycle.position, rejected=tuple(cycle.rejected))
             cycle.next_scan = now if target is not None else now + .2
+            if (target is None and self.agent and cycle.shore_moves < 3
+                    and not self.stopping and not self.paused):
+                step = shore_approach(frame)
+                previous, cycle.shore_step = cycle.shore_step, step
+                if step and previous and max(abs(a - b) for a, b in zip(step, previous)) <= .012:
+                    if controls.click(region, *step):
+                        cycle.shore_step = None
+                        cycle.shore_moves += 1
+                        cycle.next_step = now + 1.15
+                        cycle.candidate = None
+                        self._log.info("Přesun k břehu před měřením dosahu prutu.")
+                        return "Přicházím k vodě."
+            else:
+                cycle.shore_step = None
             if target is None and now >= cycle.next_hover and not self.stopping and not self.paused:
                 point = casting_hover(frame, cycle.hover_probe)
                 if point is not None:

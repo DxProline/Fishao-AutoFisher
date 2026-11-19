@@ -16,7 +16,7 @@ from minigame import BalanceDetector, BalancePolicy
 from recorded import Recording
 from recorder import Recorder
 from replay import replay
-from spots import casting_hover, casting_spot, casting_target
+from spots import casting_hover, casting_spot, casting_target, shore_approach
 from vision import VisualDetector
 from window import Region
 
@@ -87,7 +87,7 @@ class RecordedWorkflow(unittest.TestCase):
         self.assertEqual(detector.analyze(255 - resized, 10 * STEP)["visual_state"], "scene_change")
 
     def test_balance_holds_opposite_direction_and_releases(self) -> None:
-        def dialog(position: float) -> np.ndarray:
+        def dialog(position: float, partial: bool = False) -> np.ndarray:
             image = np.full((580, 740, 3), (155, 218, 186), np.uint8)
             x, y, width, height = 280, 403, 284, 31
             color = np.zeros((height, width, 3), np.uint8)
@@ -96,7 +96,8 @@ class RecordedWorkflow(unittest.TestCase):
             color[:, :, 1:] = 251
             image[y : y + height, x : x + width] = cv2.cvtColor(color, cv2.COLOR_HSV2BGR)
             center = x + round(position * width)
-            for edge, inset in ((y, y + 9), (y + height - 1, y + height - 10)):
+            rows = ((y, y + 9),) if partial else ((y, y + 9), (y + height - 1, y + height - 10))
+            for edge, inset in rows:
                 points = np.array([(center - 5, edge), (center + 5, edge), (center, inset)], np.int32)
                 cv2.fillConvexPoly(image, points, (210, 98, 12))
             return image
@@ -112,6 +113,11 @@ class RecordedWorkflow(unittest.TestCase):
         resized = cv2.resize(dialog(.30), (1332, 1044))
         self.assertEqual(policy.choose(detector.analyze(resized)), "right")
         self.assertIsNone(policy.choose(detector.analyze(self.base)))
+        self.assertIsNone(detector.analyze(dialog(.64, partial=True)))
+        self.assertIsNotNone(detector.analyze(dialog(.64)))
+        partial = detector.analyze_crop(dialog(.70, partial=True), 0, 0)
+        self.assertIsNotNone(partial)
+        self.assertEqual(policy.choose(partial), "left")
 
     def test_test_cast_requires_circle_and_water(self) -> None:
         scene = np.full((550, 680, 3), (174, 222, 237), np.uint8)
@@ -202,6 +208,18 @@ class RecordedWorkflow(unittest.TestCase):
         for target in (first, other):
             self.assertTrue(155 < target.point[1] * 550 < 225)
             self.assertLess(np.hypot(target.point[0] * 680 - 305, target.point[1] * 550 - 260), 145)
+
+    def test_approach_stops_on_land_and_does_not_walk_when_at_shore(self) -> None:
+        scene = np.full((550, 680, 3), (24, 160, 65), np.uint8)
+        scene[:200] = (207, 134, 20)
+        cv2.ellipse(scene, (305, 269), (15, 14), 0, 0, 360, (170, 50, 105), -1)
+        step = shore_approach(scene)
+        self.assertIsNotNone(step)
+        self.assertGreater(step[1] * 550, 200)
+        self.assertLess(step[1] * 550, 270)
+        scene[200:] = (24, 160, 65)
+        cv2.ellipse(scene, (305, 165), (15, 14), 0, 0, 360, (170, 50, 105), -1)
+        self.assertIsNone(shore_approach(scene))
 
     def test_write_inputs_and_frames(self) -> None:
         base = self.base

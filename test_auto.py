@@ -217,6 +217,26 @@ class AutoTest(unittest.TestCase):
         tick(2, 3.)
         self.controls.click.assert_called_once()
 
+    def test_agent_approaches_shore_before_casting(self) -> None:
+        auto = Auto(agent=True)
+        walk = (.5, .5)
+        water = (.5, .3)
+        target = CastTarget(water, walk, .16, .54)
+        hud = Hud(8, 20, 20, True, (.95, .55), (.95, .73))
+        with patch("bot.shore_approach", return_value=walk), patch("bot.casting_hover", return_value=None):
+            with patch("bot.casting_target", return_value=None):
+                auto._ready(self.cycle, hud, self.frame, 1., self.controls, self.region)
+                self.controls.click.assert_not_called()
+                auto._ready(self.cycle, hud, self.frame, 2., self.controls, self.region)
+            self.controls.click.assert_called_once_with(self.region, *walk)
+            with patch("bot.casting_target", return_value=target):
+                auto._ready(self.cycle, hud, self.frame, 2.5, self.controls, self.region)
+                auto._ready(self.cycle, hud, self.frame, 4., self.controls, self.region)
+                self.assertEqual(self.controls.click.call_count, 1)
+                auto._ready(self.cycle, hud, self.frame, 5., self.controls, self.region)
+            self.controls.click.assert_called_with(self.region, *water)
+            self.assertEqual(self.cycle.phase, Phase.CAST)
+
     def test_autofish_recasts_after_long_wait_and_after_result(self) -> None:
         auto = Auto()
         ready, busy, balance, caught = range(4)

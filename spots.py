@@ -140,6 +140,46 @@ def casting_hover(image: Image, attempt: int = 0) -> Point | None:
     return point
 
 
+def shore_approach(image: Image) -> Point | None:
+    """Najde krátký krok po souši k ověřené vodě na stejné obrazovce."""
+    frame = _scene(image)
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    height, width = hsv.shape[:2]
+    avatars = _avatars(hsv)
+    if len(avatars) != 1:
+        return None
+    x, y, _, hat = avatars[0]
+    feet = np.array((x, y + 1.25 * hat))
+    world = _castable_view(width, height)
+    water = _open_water(hsv) & world
+    depth = cv2.distanceTransform(water.astype(np.uint8), cv2.DIST_L2, 3)
+    yy, xx = np.ogrid[:height, :width]
+    distance = (xx - feet[0])**2 + (yy - feet[1])**2
+    near = depth >= 4
+    if not near.any():
+        return None
+    row, col = np.unravel_index(np.where(near, distance, np.inf).argmin(), depth.shape)
+    direction = np.array((col, row)) - feet
+    length = float(np.linalg.norm(direction))
+    if not .85 * hat < length <= 8 * hat:
+        return None
+    # Zastav na suché straně hranice, i když je u břehu jen úzký pás vody.
+    path = np.rint(np.linspace(feet, feet + direction, max(2, round(length)))).astype(int)
+    if not ((0 <= path[:, 0]).all() and (path[:, 0] < width).all()
+            and (0 <= path[:, 1]).all() and (path[:, 1] < height).all()):
+        return None
+    wet = np.flatnonzero(water[path[:, 1], path[:, 0]])
+    if not wet.size:
+        return None
+    step = min(round(4 * hat), int(wet[0]) - max(3, round(hat * .20)))
+    if step < .65 * hat:
+        return None
+    sx, sy = path[step]
+    if not world[sy, sx] or water[sy-2:sy+3, sx-2:sx+3].any():
+        return None
+    return int(sx) / width, int(sy) / height
+
+
 def casting_target(image: Image, preferred: Point | None = None, avoid: Point | None = None,
                    rejected: tuple[Point, ...] = ()) -> CastTarget | None:
     """Hledá přední sektor dosahu až po rozpoznání vlastního kruhu a břehu."""

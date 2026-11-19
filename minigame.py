@@ -25,30 +25,34 @@ class BalanceDetector:
     """Zelený střed a dvojice modrých hrotů z dialogu YOU HAVE A BITE."""
 
     def __init__(self) -> None:
-        self._prior: PixelBox | None = None
+        self._prior: Balance | None = None
 
     def analyze(self, frame: Image) -> Balance | None:
         height, width = frame.shape[:2]
         if self._prior:
-            x, y, w, h = self._prior
+            x, y, w, h = self._prior.bar
             left, top = max(0, x - w // 5), max(0, y - h)
             right, bottom = min(width, x + w + w // 5), min(height, y + 2 * h)
-            found = self._find(frame[top:bottom, left:right], left, top, 1.0)
+            found = self._find(frame[top:bottom, left:right], left, top, 1.0, self._prior)
             if found:
-                self._prior = found.bar
+                self._prior = found
                 return found
         scale = min(1.0, 1280 / width)
         sample = frame if scale == 1 else cv2.resize(frame, (round(width * scale), round(height * scale)),
                                                       interpolation=cv2.INTER_AREA)
         result = self._find(sample, 0, 0, scale)
-        self._prior = result.bar if result else None
+        self._prior = result
         return result
 
     def analyze_crop(self, image: Image, x: int, y: int) -> Balance | None:
-        return self._find(image, x, y, 1.0)
+        result = self._find(image, x, y, 1.0, self._prior)
+        if result is not None:
+            self._prior = result
+        return result
 
     @staticmethod
-    def _find(image: Image, origin_x: int, origin_y: int, scale: float) -> Balance | None:
+    def _find(image: Image, origin_x: int, origin_y: int, scale: float,
+              prior: Balance | None = None) -> Balance | None:
         if min(image.shape[:2]) < 8:
             return None
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
@@ -70,15 +74,18 @@ class BalanceDetector:
             band = np.flatnonzero((hue >= 47) & (hue <= 79))
             if band.size < w * 0.15:
                 continue
-            marker = BalanceDetector._marker(hsv, x, y, w, h)
+            geometry = (origin_x + round(x / scale), origin_y + round(y / scale),
+                        round(w / scale), round(h / scale))
+            last = None
+            if prior and all(abs(a - b) <= max(3, h // 3) for a, b in zip(geometry, prior.bar)):
+                last = prior.indicator * (w - 1)
+            marker = BalanceDetector._marker(hsv, x, y, w, h, last)
             if marker is not None:
-                geometry = (origin_x + round(x / scale), origin_y + round(y / scale),
-                            round(w / scale), round(h / scale))
                 return Balance(geometry, marker / (w - 1), (int(band[0]) + int(band[-1])) / (2 * (w - 1)))
         return None
 
     @staticmethod
-    def _marker(hsv: Image, x: int, y: int, w: int, h: int) -> float | None:
+    def _marker(hsv: Image, x: int, y: int, w: int, h: int, last: float | None = None) -> float | None:
         reach = max(2, round(h * 0.14))
         depth = max(3, round(h * 0.40))
         mask = cv2.inRange(hsv[max(0, y - reach) : min(hsv.shape[0], y + h + reach), x : x + w],
@@ -94,11 +101,18 @@ class BalanceDetector:
                 and statistics[i, cv2.CC_STAT_WIDTH] <= h * 0.80
             ]
 
-        pairs = [(abs(a - b), (a + b) / 2) for a in centers(upper) for b in centers(lower)]
-        if not pairs:
-            return None
-        distance, center = min(pairs)
-        return center if distance <= max(3, h * 0.22) else None
+        a, b = centers(upper), centers(lower)
+        pairs = [(abs(left - right), (left + right) / 2) for left in a for right in b]
+        if pairs:
+            distance, center = min(pairs)
+            if distance <= max(3, h * 0.22):
+                return center
+        # Jeden hrot stačí až po ověření stejné lišty a návaznosti pohybu.
+        if last is not None and bool(a) != bool(b):
+            plausible = [center for center in a + b if abs(center - last) <= w * .16]
+            if len(plausible) == 1:
+                return plausible[0]
+        return None
 
 
 class BalancePolicy:

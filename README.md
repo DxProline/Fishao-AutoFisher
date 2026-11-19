@@ -90,6 +90,8 @@ Před spuštěním lovu zapni **Agent · postup, vybavení a mise**. Příkaz `-
 
 Při lovu se bod vybírá z vody uvnitř aktuálního kruhu prutu. Když hra hod nepotvrdí, automat zkusí další rozpoznaný bod. Při nejistém dosahu přejíždí kurzorem nad vodou a čeká na potvrzený kruh. AutoFish a agent drží průběžný náhled v paměti. Základní režim záznamníku je určený pro ruční ukládání snímků.
 
+Pokud je postava dál od rozpoznané vody, agent může udělat krátký krok po souši k břehu a pak znovu změřit dosah prutu. Po záběru ukazuje průběh minihry v hlavním okně a její začátek zapisuje do událostí. Číslo aktuální verze je v levém horním rohu.
+
 Agent pracuje s ověřenými obrazovkami hry. Další typy misí, samostatné obchodování s úlovky a úkony kolem domu zatím vyžadují hráče.
 
 ### Hra v překrytém okně
