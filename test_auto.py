@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 import cv2
 import numpy as np
 
+from activities import Activities, Panel
 from bot import Auto, Cycle, Phase
 from game_ui import EnergyShop, Hud, Interface, Inventory, Match, SIZE
 from minigame import Balance, BalancePolicy
@@ -159,7 +160,7 @@ class AutoTest(unittest.TestCase):
         self.assertIs(Interface.fishing_ready(frame, rod, bait), False)
 
     def test_refill_confirms_quote_and_sends_one_purchase(self) -> None:
-        auto = Auto(xp_farm=True)
+        auto = Auto(xp_farm=True, buy_energy=True)
         cycle = Cycle(phase=Phase.REFILL)
         buy, close = (.70, .27), (.76, .13)
         shop = EnergyShop(35, 35, 0, buy, close)
@@ -172,8 +173,46 @@ class AutoTest(unittest.TestCase):
         auto._refill(cycle, None, True, 5., self.controls, self.region)
         self.assertEqual(cycle.phase, Phase.ENERGY)
 
+    def test_energy_switch_aborts_purchase_after_shop_has_opened(self) -> None:
+        auto = Auto(xp_farm=True, buy_energy=True)
+        cycle = Cycle(phase=Phase.REFILL)
+        shop = EnergyShop(100, 35, 0, (.70, .27), (.76, .13))
+        auto._refill(cycle, shop, False, 1., self.controls, self.region)
+        auto.set_energy_purchase(False)
+        auto._refill(cycle, shop, False, 2., self.controls, self.region)
+        self.controls.click.assert_called_once_with(self.region, *shop.close)
+
+    def test_agent_opens_only_confirmed_panel_while_idle(self) -> None:
+        ui = Interface()
+        tile = ui.templates["missions_icon"]
+        h, w = tile.shape[:2]
+        self.frame[210:210+h, 8:8+w] = tile
+        agent = Activities(ui)
+        self.assertIsNone(agent.tick(self.frame, False, 1., self.controls, self.region))
+        self.assertEqual(agent.tick(self.frame, True, 2., self.controls, self.region), "Otevřít mise")
+        agent.reset_observation()
+        agent.tick(self.frame, True, 3., self.controls, self.region)
+        self.controls.click.assert_not_called()
+        agent.tick(self.frame, True, 4., self.controls, self.region)
+        self.controls.click.assert_called_once_with(self.region, 30 / SIZE[0], 230 / SIZE[1])
+        self.assertGreater(agent.due[Panel.MISSIONS], 4.)
+
+    def test_tournament_countdown_prevents_signup(self) -> None:
+        ui = Interface()
+        for key, x, y in (("tournament_podium", 548, 310), ("tournament_start", 309, 541),
+                          ("tournament_countdown", 560, 542),
+                          ("activity_close", 972, 53), ("tournament_signup", 851, 559)):
+            tile = ui.templates[key]
+            h, w = tile.shape[:2]
+            self.frame[y:y+h, x:x+w] = tile
+        agent = Activities(ui)
+        agent.tick(self.frame, False, 1., self.controls, self.region)
+        self.controls.click.assert_not_called()
+        agent.tick(self.frame, False, 2., self.controls, self.region)
+        self.controls.click.assert_called_once_with(self.region, 986 / SIZE[0], 67 / SIZE[1])
+
     def test_refill_closes_when_balance_energy_or_price_is_not_confirmed(self) -> None:
-        auto = Auto(xp_farm=True)
+        auto = Auto(xp_farm=True, buy_energy=True)
         buy, close = (.70, .27), (.76, .13)
         for balance, price, energy in ((34, 35, 0), (None, 35, 0), (40, 30, 0), (40, 35, 1), (40, 35, None)):
             with self.subTest(balance=balance, price=price, energy=energy):

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from threading import Event
 from time import perf_counter
 
+from activities import Activities
 from assist import TARGET_HZ, TRACK_MISSES, Assist
 from controls import Controls
 from game_ui import EnergyShop, Hud, Interface, Inventory, Point
@@ -83,13 +85,23 @@ class Cycle:
 class Auto(Assist):
     """Opakování ověřených akcí nad obrazem hry, v samostatném vlákně."""
 
-    def __init__(self, *, xp_farm: bool = False) -> None:
+    def __init__(self, *, xp_farm: bool = False, buy_energy: bool = False, agent: bool = False) -> None:
         super().__init__()
         self.xp_farm = xp_farm
-        self.name = "XP Farm" if xp_farm else "AutoFish"
+        self.name = "Agent Fishao" if agent else "XP Farm" if xp_farm else "AutoFish"
+        self.agent = agent
+        self.energy_purchase_enabled = Event()
+        self.set_energy_purchase(buy_energy)
+
+    def set_energy_purchase(self, enabled: bool) -> None:
+        if enabled:
+            self.energy_purchase_enabled.set()
+        else:
+            self.energy_purchase_enabled.clear()
 
     def _loop(self, capture: WindowCapture, controls: Controls) -> str:
         ui, detector, policy = Interface(), BalanceDetector(), BalancePolicy()
+        activities = Activities(ui) if self.agent else None
         cycle = Cycle()
         crop: PixelBox | None = None
         expected: tuple[int,int] | None = None
@@ -104,6 +116,8 @@ class Auto(Assist):
         while not self.stopping:
             tick = perf_counter()
             if self.paused:
+                if activities:
+                    activities.reset_observation()
                 controls.release()
                 policy.choose(None)
                 self._tracking_times.clear()
@@ -116,6 +130,8 @@ class Auto(Assist):
             try:
                 frame, region = capture.grab(crop, expected=expected if crop else None)
             except FrameUnavailable as exc:
+                if activities:
+                    activities.reset_observation()
                 controls.release()
                 policy.choose(None)
                 self._tracking_times.clear()
@@ -140,6 +156,8 @@ class Auto(Assist):
             controls.direction(region.hwnd, direction)
             tracking_fps = self._tracking_rate(balance is not None, captured_at)
             if balance:
+                if activities:
+                    activities.reset_observation()
                 ready_frames, agreement, repetitions = 0, None, 0
                 cycle.candidate = None
                 crop_misses = 0
@@ -160,7 +178,7 @@ class Auto(Assist):
                 message = "Hledám ukazatel na liště minihry."
             else:
                 image = ui.normalize(frame)
-                shop = ui.energy_shop(image) if self.xp_farm else None
+                shop = ui.energy_shop(image) if self.energy_purchase_enabled.is_set() or cycle.phase is Phase.REFILL else None
                 result = ui.result(image) if cycle.phase not in (Phase.GEAR, Phase.REFILL) else None
                 if result != observed_result:
                     observed_result, result_seen = result, 0
@@ -220,12 +238,20 @@ class Auto(Assist):
                     if ready_frames >= 2:
                         cycle.finish_attempt(active)
                         cycle.advance(Phase.READY,active)
-                elif cycle.phase in (Phase.READY, Phase.ENERGY) and busy:
+                activity = None
+                if (activities and cycle.phase in (Phase.READY, Phase.ENERGY)
+                        and not inventory and not result and shop is None
+                        and not self.stopping and not self.paused):
+                    activity = activities.tick(image, ready_frames >= 2, active, controls, region)
+                    if activity:
+                        cycle.candidate = None
+                if not activity and cycle.phase in (Phase.READY, Phase.ENERGY) and busy:
                     cycle.advance(Phase.WAIT, active)
-                if cycle.phase in (Phase.READY,Phase.ENERGY) and stable and hud:
+                if not activity and cycle.phase in (Phase.READY,Phase.ENERGY) and stable and hud:
                     self._ready(cycle,hud,frame,active,controls,region)
-                    if (self.xp_farm and cycle.phase is Phase.ENERGY and not cycle.checked_shop
-                            and active >= cycle.next_action):
+                    if (self.energy_purchase_enabled.is_set() and cycle.phase is Phase.ENERGY
+                            and not cycle.checked_shop and active >= cycle.next_action
+                            and not self.stopping and not self.paused):
                         button = ui.energy_button(image)
                         if button is not None and controls.click(region, *button):
                             cycle.checked_shop = True
@@ -240,6 +266,8 @@ class Auto(Assist):
                     message += " · čekám na kruh dosahu nad vodou"
                 if cycle.phase is Phase.GEAR and cycle.gear_step == "unavailable":
                     message = "Čekám na dostupný prut nebo návnadu."
+                if activity:
+                    message = activity
             if active >= next_preview:
                 next_preview = active + (1/24 if selected_crop else .12)
                 preview = frame.copy() if balance else frame
@@ -310,7 +338,7 @@ class Auto(Assist):
             return
         # Platí jen ověřená nabídka na bankovky. Po kliku nákup neopakujeme,
         # dokud hra znovu nepotvrdí kladný stav energie.
-        if (not cycle.shop_clicked and shop.energy == 0 and shop.buy is not None
+        if (self.energy_purchase_enabled.is_set() and not cycle.shop_clicked and shop.energy == 0 and shop.buy is not None
                 and shop.price == 35 and shop.balance is not None and shop.balance >= shop.price):
             if controls.click(region, *shop.buy):
                 cycle.shop_clicked = True

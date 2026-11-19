@@ -36,7 +36,7 @@ class GuiLog(logging.Handler):
 class App:
     def __init__(self, root: tk.Tk, output_dir: Path, fps: int, *, assist: bool = False,
                  cast_once: bool = False, autofish: bool = False, xp_farm: bool = False,
-                 image_format: str = "jpg") -> None:
+                 image_format: str = "jpg", agent: bool = False) -> None:
         self.root = root
         self.output_dir = output_dir
         self.fps = fps
@@ -45,6 +45,8 @@ class App:
         self.assist = assist
         self.cast_once = cast_once
         self.xp_farm = xp_farm
+        self.agent = tk.BooleanVar(master=root, value=agent)
+        self.buy_energy = tk.BooleanVar(master=root, value=False)
         self.autofish = autofish
         self.action_name = ("XP Farm" if xp_farm else "AutoFish") if autofish else "asistenci" if assist else "záznam"
         self.title = f"Fishao {self.action_name}" if autofish else "Fishao Asistence" if assist else "Fishao Záznamník"
@@ -118,6 +120,12 @@ class App:
         if self.autofish:
             mode = "Do ručního vypnutí"
         ttk.Label(bar, text=mode, style="Muted.TLabel").pack(side="right")
+        if self.autofish:
+            ttk.Checkbutton(shell, text="Automaticky kupovat energii za herní bankovky",
+                            variable=self.buy_energy, command=self._update_energy_purchase).pack(anchor="w", pady=(0, 10))
+            self.agent_option = ttk.Checkbutton(shell, text="Agent · kontrolovat mise a turnaje",
+                                                variable=self.agent)
+            self.agent_option.pack(anchor="w", pady=(0, 10))
 
         cards = ttk.Frame(shell)
         cards.pack(fill="x", pady=(0, 10))
@@ -189,6 +197,8 @@ class App:
         self.toggle_button.configure(text=label, state="disabled" if stopping or self.closing else "normal")
         self.stop_button.configure(text="Zastavit" if self.shortcut_warning else "Zastavit · F9",
                                    state="normal" if active and not stopping else "disabled")
+        if self.autofish:
+            self.agent_option.configure(state="disabled" if active else "normal")
 
     def toggle(self) -> None:
         if self.closing:
@@ -202,12 +212,16 @@ class App:
             self.canvas.itemconfigure(self.canvas_image, image="")
             self.canvas.itemconfigure(self.canvas_message, state="normal")
             if self.autofish:
-                self.recorder = Auto(xp_farm=self.xp_farm)
+                self.recorder = Auto(xp_farm=self.xp_farm, buy_energy=self.buy_energy.get(), agent=self.agent.get())
             else:
                 self.recorder = Assist(self.cast_once) if self.assist else Recorder(
                     self.output_dir, self.fps, image_format=self.image_format)
             self.recorder.start()
         self._buttons()
+
+    def _update_energy_purchase(self) -> None:
+        if isinstance(self.recorder, Auto):
+            self.recorder.set_energy_purchase(self.buy_energy.get())
 
     def _emergency(self) -> None:
         current = self.recorder

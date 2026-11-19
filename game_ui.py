@@ -58,7 +58,10 @@ class Interface:
         self.templates = {key: self._image(ROOT / f"{key}.png") for key in
                           ("energy", "rod", "bait", "inventory", "select", "select_hover",
                            "caught", "escaped", "fishdex_button", "result_x", "energy_plus",
-                           "energy_shop", "energy_cash", "energy_price_cash", "energy_offer_five")}
+                           "energy_shop", "energy_cash", "energy_price_cash", "energy_offer_five",
+                           "missions_icon", "missions_title", "missions_next", "mission_rare_fish",
+                           "tournament_icon", "tournament_podium", "tournament_start", "tournament_countdown", "activity_close",
+                           "tournament_coin", "tournament_signup", "wallet_coin")}
         # Porovnáváme vnitřek blesku. Okraje obsahují průhledné pozadí mapy.
         lightning = cv2.cvtColor(self.templates["energy"], cv2.COLOR_BGR2HSV)
         self.energy_mask = cv2.erode(cv2.inRange(lightning, (75, 125, 130), (110, 255, 255)),

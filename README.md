@@ -78,7 +78,15 @@ Před startem postav postavu u vody, zobraz kruh dosahu a ověř energii, prut a
 & $python .\main.py --xp-farm
 ```
 
-XP Farm při nulové energii zkontroluje herní obchod a vezme ověřený balíček 5 energie za 35 herních bankovek, pokud stačí zůstatek. Jinak zavře nabídku a pokračuje po přirozeném dobití. **F8** spustí nebo pozastaví lov a **F9** ho ukončí. Při ztrátě fokusu nebo nečitelném stavu hry automat čeká a průběžně kontroluje obraz.
+Volba **Automaticky kupovat energii za herní bankovky** je po otevření aplikace vypnutá a jde změnit i během lovu. Zapnutá volba dovolí při nulové energii koupit ověřený balíček 5 energie za 35 bankovek, pokud stačí zůstatek. Při vypnuté volbě nebo nedostatku bankovek automat pokračuje po přirozeném dobití. **F8** spustí nebo pozastaví lov a **F9** ho ukončí. Při ztrátě fokusu nebo nečitelném stavu hry automat čeká a průběžně kontroluje obraz.
+
+### Agent
+
+```powershell
+& $python .\main.py --agent
+```
+
+Před spuštěním lovu zapni **Agent · kontrolovat mise a turnaje** v aplikaci. Příkaz `--agent` tuto volbu předvybere. Mezi hody agent projde obrazovku misí a u rozpoznané mise na čtyřhvězdičkovou rybu pokračuje v lovu. U známého turnajového panelu filtruje přihlášku podle stavu registrace a dostupných herních mincí. Při neověřené registraci zavře panel a pokračuje v běžném lovu. Agent neotevírá chat ani neposílá zprávy. Obchody s výbavou, přesuny do placených zón a samostatné postupy pro ostatní mise zatím vyžadují hráče.
 
 Pohyb postavy k vodě zajišťuje hráč. Hra a automat musí mít stejnou úroveň oprávnění Windows. Rozpoznávání bylo ověřené na skutečných snímcích úlovku, úniku a inventáře. Průchod AutoFish a rychlé změny směru byly testované simulací. Celý automatický průchod ve hře je třeba ověřit prvním hlídaným spuštěním. Probíhající hod může skončit i bez úlovku. AutoFish se řídí stavem hry a při nejasném obraze vyčkává.
 
