@@ -78,7 +78,7 @@ Před startem postav postavu u vody, zobraz kruh dosahu a ověř energii, prut a
 & $python .\main.py --xp-farm
 ```
 
-Volba **Automaticky kupovat energii za herní bankovky** je po otevření aplikace vypnutá a jde změnit i během lovu. Zapnutá volba dovolí při nulové energii koupit ověřený balíček 5 energie za 35 bankovek, pokud stačí zůstatek. Při vypnuté volbě nebo nedostatku bankovek automat pokračuje po přirozeném dobití. **F8** spustí nebo pozastaví lov a **F9** ho ukončí. Při ztrátě fokusu nebo nečitelném stavu hry automat čeká a průběžně kontroluje obraz.
+Při nulové energii automat počká na přirozené dobití. **F8** spustí nebo pozastaví lov a **F9** ho ukončí. Při ztrátě fokusu nebo nečitelném stavu hry automat čeká a průběžně kontroluje obraz.
 
 ### Agent
 
@@ -86,7 +86,11 @@ Volba **Automaticky kupovat energii za herní bankovky** je po otevření aplika
 & $python .\main.py --agent
 ```
 
-Před spuštěním lovu zapni **Agent · kontrolovat mise a turnaje** v aplikaci. Příkaz `--agent` tuto volbu předvybere. Mezi hody agent projde obrazovku misí a u rozpoznané mise na čtyřhvězdičkovou rybu pokračuje v lovu. U známého turnajového panelu filtruje přihlášku podle stavu registrace a dostupných herních mincí. Při neověřené registraci zavře panel a pokračuje v běžném lovu. Agent neotevírá chat ani neposílá zprávy. Obchody s výbavou, přesuny do placených zón a samostatné postupy pro ostatní mise zatím vyžadují hráče.
+Před spuštěním lovu zapni **Agent · postup, vybavení a mise**. Příkaz `--agent` tuto volbu předvybere. Po sérii málo úspěšných hodů umí zkusit přechod na Trout Farm. Rozpoznaná mise na čtyřhvězdičkovou rybu zkracuje dobu před porovnáním výsledků na stávajícím místě. Při chybějícím prutu nebo návnadě nejdřív projde inventář a teprve potom hledá ověřenou nabídku v obchodě. Porovnává ceny prutů a drží rezervu 30 bankovek. Při opakovaném úniku ryb prověří vlasec a po případném upgradu ponechá rezervu 5 mincí. Turnaje kontroluje nejvýše jednou za pět minut. Při neověřené registraci zavře panel a vrátí se k lovu.
+
+Při lovu se bod vybírá z vody uvnitř aktuálního kruhu prutu. Když hra hod nepotvrdí, automat zkusí další rozpoznaný bod. Při nejistém dosahu přejíždí kurzorem nad vodou a čeká na potvrzený kruh. AutoFish a agent drží průběžný náhled v paměti. Základní režim záznamníku je určený pro ruční ukládání snímků.
+
+Agent pracuje s ověřenými obrazovkami hry. Další typy misí, samostatné obchodování s úlovky a úkony kolem domu zatím vyžadují hráče.
 
 ### Hra v překrytém okně
 

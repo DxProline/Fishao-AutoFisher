@@ -19,7 +19,7 @@ def main() -> None:
     parser.add_argument("--xp-farm", action="store_true",
                         help="Spustí nepřetržitý lov v režimu XP Farm.")
     parser.add_argument("--agent", action="store_true",
-                        help="Otevře lov s předvolenou kontrolou misí a turnajů.")
+                        help="Otevře lov s plánováním postupu a výbavy.")
     parser.add_argument("--test-cast", action="store_true", help="S asistencí umožní jeden zkušební klik do vody.")
     args = parser.parse_args()
     if args.test_cast and not args.assist:

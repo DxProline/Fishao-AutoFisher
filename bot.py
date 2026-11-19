@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from threading import Event
 from time import perf_counter
 
 from activities import Activities
 from assist import TARGET_HZ, TRACK_MISSES, Assist
 from controls import BackgroundControls, Controls
-from game_ui import EnergyShop, Hud, Interface, Inventory, Point
+from game_ui import Hud, Interface, Inventory, Point
 from minigame import BalanceDetector, BalancePolicy, PixelBox
+from progression import Progression
 from recorder import NS
 from spots import CastTarget, casting_hover, casting_target
 from window import FrameUnavailable, Image, Region, WindowCapture
@@ -23,7 +23,6 @@ class Phase(str, Enum):
     RESULT = "Čekám na výsledek"
     CLOSE = "Zavírám výsledek"
     ENERGY = "Čekám na dobití energie"
-    REFILL = "Ověřuji doplnění energie"
     GEAR = "Vybírám vybavení"
 
 
@@ -40,8 +39,10 @@ class Cycle:
     escaped: int = 0
     position: Point | None = None
     candidate: CastTarget | None = None
+    rejected: list[Point] = field(default_factory=list)
     next_scan: float = 0.
     next_hover: float = 0.
+    hover_probe: int = 0
     score: dict[Point, int] = field(default_factory=dict)
     gear: str | None = None
     gear_step: str = ""
@@ -51,14 +52,13 @@ class Cycle:
     select_attempts: int = 0
     original_energy: int | None = None
     attempt_pending: bool = False
-    checked_shop: bool = False
-    shop_quote: EnergyShop | None = None
-    shop_clicked: bool = False
 
     def confirm_cast(self) -> None:
         if self.phase is Phase.CAST:
             self.attempt_pending = True
             self.casts += 1
+            self.rejected.clear()
+            self.hover_probe = 0
 
     def advance(self, phase: Phase, now: float, *, progress: bool = True) -> None:
         if self.phase != phase:
@@ -74,6 +74,8 @@ class Cycle:
                 self.escaped += 1
             if self.position is not None:
                 self.score[self.position] = self.score.get(self.position, 0) + (2 if result == "caught" else -1)
+                if len(self.score) > 48:
+                    del self.score[min(self.score, key=self.score.__getitem__)]
         self.attempt_pending = False
         self.candidate = None
         self.next_scan = now
@@ -85,24 +87,17 @@ class Cycle:
 class Auto(Assist):
     """Opakování ověřených akcí nad obrazem hry, v samostatném vlákně."""
 
-    def __init__(self, *, xp_farm: bool = False, buy_energy: bool = False, agent: bool = False,
+    def __init__(self, *, xp_farm: bool = False, agent: bool = False,
                  background: bool = False) -> None:
         super().__init__(background=background)
         self.xp_farm = xp_farm
         self.name = "Agent Fishao" if agent else "XP Farm" if xp_farm else "AutoFish"
         self.agent = agent
-        self.energy_purchase_enabled = Event()
-        self.set_energy_purchase(buy_energy)
-
-    def set_energy_purchase(self, enabled: bool) -> None:
-        if enabled:
-            self.energy_purchase_enabled.set()
-        else:
-            self.energy_purchase_enabled.clear()
 
     def _loop(self, capture: WindowCapture, controls: Controls) -> str:
         ui, detector, policy = Interface(), BalanceDetector(), BalancePolicy()
         activities = Activities(ui) if self.agent else None
+        progression = Progression(ui) if self.agent else None
         cycle = Cycle()
         crop: PixelBox | None = None
         expected: tuple[int,int] | None = None
@@ -119,6 +114,8 @@ class Auto(Assist):
             if self.paused:
                 if activities:
                     activities.reset_observation()
+                if progression:
+                    progression.reset_observation()
                 controls.release()
                 policy.choose(None)
                 self._tracking_times.clear()
@@ -133,6 +130,8 @@ class Auto(Assist):
             except FrameUnavailable as exc:
                 if activities:
                     activities.reset_observation()
+                if progression:
+                    progression.reset_observation()
                 controls.release()
                 policy.choose(None)
                 self._tracking_times.clear()
@@ -150,7 +149,7 @@ class Auto(Assist):
             selected_crop = crop
             captured_at = perf_counter()
             balance = (detector.analyze_crop(frame, crop[0], crop[1]) if crop else detector.analyze(frame)
-                       ) if cycle.phase not in (Phase.CLOSE, Phase.GEAR, Phase.ENERGY, Phase.REFILL) else None
+                       ) if cycle.phase not in (Phase.CLOSE, Phase.GEAR, Phase.ENERGY) else None
             direction = policy.choose(balance, captured_at)
             if self.stopping or self.paused:
                 continue
@@ -179,8 +178,7 @@ class Auto(Assist):
                 message = "Hledám ukazatel na liště minihry."
             else:
                 image = ui.normalize(frame)
-                shop = ui.energy_shop(image) if self.energy_purchase_enabled.is_set() or cycle.phase is Phase.REFILL else None
-                result = ui.result(image) if cycle.phase not in (Phase.GEAR, Phase.REFILL) else None
+                result = ui.result(image) if cycle.phase is not Phase.GEAR else None
                 if result != observed_result:
                     observed_result, result_seen = result, 0
                 result_seen += 1
@@ -194,8 +192,8 @@ class Auto(Assist):
                     self._log.info("Výsledek: %s. Úlovky: %s.", result, cycle.caught)
                 inventory = ui.inventory(image)
                 hud = ui.hud(image)
-                ready = hud is not None and hud.ready is True and inventory is None and result is None and shop is None
-                busy = hud is not None and hud.ready is False and inventory is None and result is None and shop is None
+                ready = hud is not None and hud.ready is True and inventory is None and result is None
+                busy = hud is not None and hud.ready is False and inventory is None and result is None
                 ready_frames = ready_frames + 1 if ready else 0
                 key = (hud.energy,hud.rod,hud.bait) if ready and hud else None
                 repetitions = repetitions + 1 if key is not None and key == agreement else 1
@@ -205,10 +203,12 @@ class Auto(Assist):
                     cycle.candidate = None
                 if self.stopping or self.paused:
                     continue
-                if cycle.phase is Phase.REFILL:
-                    self._refill(cycle, shop, ready_frames >= 2, active, controls, region)
-                elif cycle.phase is Phase.GEAR:
+                if cycle.phase is Phase.GEAR:
                     self._gear(cycle, inventory, hud, active, controls, region)
+                    if (progression and cycle.gear_step == "unavailable" and inventory
+                            and active >= progression.recheck_shop and controls.click(region, *inventory.close)):
+                        cycle.gear_step = "shop"
+                        cycle.advance(Phase.READY, active)
                 elif cycle.phase is Phase.CLOSE:
                     if result and result_seen >= 2 and active >= cycle.next_action:
                         close = ui.result_close(image, result) if cycle.retries else None
@@ -231,6 +231,9 @@ class Auto(Assist):
                         self._log.info("Nahození potvrzeno. Pokusy: %s.", cycle.casts)
                     elif ready_frames >= 2 and active - cycle.since >= CAST_ACK_S:
                         cycle.retries += 1
+                        if cycle.position is not None:
+                            cycle.rejected.append(cycle.position)
+                            del cycle.rejected[:-6]
                         cycle.finish_attempt(active)
                         cycle.advance(Phase.READY,active,progress=False)
                         stable = False
@@ -241,25 +244,27 @@ class Auto(Assist):
                         cycle.advance(Phase.READY,active)
                 activity = None
                 if (activities and cycle.phase in (Phase.READY, Phase.ENERGY)
-                        and not inventory and not result and shop is None
+                        and not inventory and not result
                         and not self.stopping and not self.paused):
-                    activity = activities.tick(image, ready_frames >= 2, active, controls, region)
+                    if progression:
+                        activity = progression.tick(
+                            image, ready=ready_frames >= 2, now=active, controls=controls, region=region,
+                            missing=cycle.gear if cycle.gear_step == "shop" else None, casts=cycle.casts,
+                            caught=cycle.caught, escaped=cycle.escaped, rare_mission=activities.rare_fish,
+                        )
+                    if not activity:
+                        activity = activities.tick(image, ready_frames >= 2, active, controls, region,
+                                                   caught=cycle.caught)
                     if activity:
                         cycle.candidate = None
+                        if progression and progression.goal == "farm":
+                            cycle.position = None
+                            cycle.score.clear()
+                            cycle.rejected.clear()
                 if not activity and cycle.phase in (Phase.READY, Phase.ENERGY) and busy:
                     cycle.advance(Phase.WAIT, active)
                 if not activity and cycle.phase in (Phase.READY,Phase.ENERGY) and stable and hud:
                     self._ready(cycle,hud,frame,active,controls,region)
-                    if (self.energy_purchase_enabled.is_set() and cycle.phase is Phase.ENERGY
-                            and not cycle.checked_shop and active >= cycle.next_action
-                            and not self.stopping and not self.paused):
-                        button = ui.energy_button(image)
-                        if button is not None and controls.click(region, *button):
-                            cycle.checked_shop = True
-                            cycle.shop_quote = None
-                            cycle.shop_clicked = False
-                            cycle.next_action = active + .45
-                            cycle.advance(Phase.REFILL, active)
                 message = cycle.phase.value
                 if hud and cycle.phase in (Phase.READY, Phase.ENERGY, Phase.WAIT):
                     message += f" · energie {hud.energy if hud.energy is not None else '?'}"
@@ -286,8 +291,6 @@ class Auto(Assist):
     def _ready(self, cycle: Cycle, hud: Hud, frame: Image, now: float, controls: Controls, region: Region) -> str | None:
         if hud.energy is None:
             return None
-        if hud.energy > 0:
-            cycle.checked_shop = False
         if cycle.phase is Phase.ENERGY and hud.energy > 0:
             cycle.advance(Phase.READY,now)
         for gear, count, slot in (("rod",hud.rod,hud.rod_button),("bait",hud.bait,hud.bait_button)):
@@ -308,12 +311,13 @@ class Auto(Assist):
             return None
         if now >= cycle.next_scan:
             preferred = cycle.candidate.point if cycle.candidate else cycle.preferred()
-            target = casting_target(frame,preferred,avoid=cycle.position)
+            target = casting_target(frame, preferred, avoid=cycle.position, rejected=tuple(cycle.rejected))
             cycle.next_scan = now if target is not None else now + .2
             if target is None and now >= cycle.next_hover and not self.stopping and not self.paused:
-                point = casting_hover(frame)
+                point = casting_hover(frame, cycle.hover_probe)
                 if point is not None:
-                    controls.hover(region, *point)
+                    if controls.hover(region, *point):
+                        cycle.hover_probe += 1
                     cycle.next_hover = now + 1.5
             if target is not None and not self.stopping and not self.paused:
                 if not controls.pointer_at(region, *target.point):
@@ -325,30 +329,6 @@ class Auto(Assist):
                     self._log.info("Klik na vodu v kruhu dosahu: %.3f, %.3f.", *target.point)
             cycle.candidate = target
         return None
-
-    def _refill(self, cycle: Cycle, shop: EnergyShop | None, ready: bool, now: float,
-                controls: Controls, region: Region) -> None:
-        if now < cycle.next_action or self.stopping or self.paused:
-            return
-        if shop is None:
-            cycle.shop_quote = None
-            if ready:
-                cycle.advance(Phase.ENERGY, now)
-            return
-        confirmed = shop == cycle.shop_quote
-        cycle.shop_quote = shop
-        if not confirmed:
-            return
-        # Platí jen ověřená nabídka na bankovky. Po kliku nákup neopakujeme,
-        # dokud hra znovu nepotvrdí kladný stav energie.
-        if (self.energy_purchase_enabled.is_set() and not cycle.shop_clicked and shop.energy == 0 and shop.buy is not None
-                and shop.price == 35 and shop.balance is not None and shop.balance >= shop.price):
-            if controls.click(region, *shop.buy):
-                cycle.shop_clicked = True
-                cycle.next_action = now + 1.
-                self._log.info("Odeslán nákup 5 energie za %s herních bankovek.", shop.price)
-        elif shop.close is not None and controls.click(region, *shop.close):
-            cycle.next_action = now + .45
 
     def _gear(self, cycle: Cycle, inv: Inventory | None, hud: Hud | None, now: float,
               controls: Controls, region: Region) -> str | None:

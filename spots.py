@@ -100,7 +100,15 @@ def _avatars(hsv: Image) -> list[tuple[float, float, int, int]]:
     return avatars
 
 
-def casting_hover(image: Image) -> Point | None:
+def _castable_view(width: int, height: int) -> np.ndarray:
+    # Úzké okraje a spodní lišta mohou mít stejnou barvu jako voda.
+    yy, xx = np.ogrid[:height, :width]
+    return ((xx >= .06 * width) & (xx < .90 * width) & (yy >= .10 * height)
+            & (yy < .96 * height)
+            & ~((xx >= .20 * width) & (xx <= .70 * width) & (yy >= .85 * height)))
+
+
+def casting_hover(image: Image, attempt: int = 0) -> Point | None:
     """Najde vodu u postavy pro najetí kurzorem, samostatně nepotvrzuje hod."""
     frame = _scene(image)
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -108,7 +116,7 @@ def casting_hover(image: Image) -> Point | None:
     avatars = _avatars(hsv)
     if not avatars:
         return None
-    depth = cv2.distanceTransform(_open_water(hsv).astype(np.uint8), cv2.DIST_L2, 3)
+    depth = cv2.distanceTransform((_open_water(hsv) & _castable_view(width, height)).astype(np.uint8), cv2.DIST_L2, 3)
     yy, xx = np.ogrid[:height, :width]
     candidates = []
     for x, y, _, hat_h in avatars:
@@ -117,14 +125,23 @@ def casting_hover(image: Image) -> Point | None:
                  & (xx >= .06*width) & (xx <= .90*width) & (yy >= .10*height) & (yy <= .86*height))
         if valid.any():
             sy, sx = np.unravel_index(np.where(valid, distance, np.inf).argmin(), depth.shape)
-            candidates.append((float(distance[sy,sx]) / hat_h**2, (int(sx) / width, int(sy) / height)))
-    candidates.sort()
+            candidates.append((float(distance[sy,sx]) / hat_h**2, valid, distance, hat_h))
+    candidates.sort(key=lambda candidate: candidate[0])
     if not candidates or len(candidates) > 1 and candidates[1][0] <= candidates[0][0] + 1.0:
         return None
-    return candidates[0][1]
+    _, valid, distance, hat_h = candidates[0]
+    for index in range(attempt % 4 + 1):
+        if not valid.any():
+            break
+        sy, sx = np.unravel_index(np.where(valid, distance, np.inf).argmin(), depth.shape)
+        point = int(sx) / width, int(sy) / height
+        if index < attempt % 4:
+            valid = valid & ((xx - sx)**2 + (yy - sy)**2 >= (2 * hat_h)**2)
+    return point
 
 
-def casting_target(image: Image, preferred: Point | None = None, avoid: Point | None = None) -> CastTarget | None:
+def casting_target(image: Image, preferred: Point | None = None, avoid: Point | None = None,
+                   rejected: tuple[Point, ...] = ()) -> CastTarget | None:
     """Hledá přední sektor dosahu až po rozpoznání vlastního kruhu a břehu."""
     frame = _scene(image)
     height, width = frame.shape[:2]
@@ -142,7 +159,7 @@ def casting_target(image: Image, preferred: Point | None = None, avoid: Point | 
     score, cx, cy, radius = circles[0]
     if len(circles) > 1 and circles[1][0] >= score - .10:
         return None
-    water = _open_water(hsv)
+    water = _open_water(hsv) & _castable_view(width, height)
     yy, xx = np.ogrid[:height, :width]
     def choose_point() -> Point | None:
         dx, dy = xx - cx, yy - cy
@@ -155,7 +172,7 @@ def casting_target(image: Image, preferred: Point | None = None, avoid: Point | 
         count, labels, stats, _ = cv2.connectedComponentsWithStats(available)
         candidates = []
         for label in range(1, count):
-            if stats[label, cv2.CC_STAT_AREA] >= area * .10:
+            if stats[label, cv2.CC_STAT_AREA] >= area * .06:
                 surface = labels == label
                 candidates.append((float(range_sq[surface].min()) ** .5, surface))
         candidates.sort(key=lambda item: item[0])
@@ -170,18 +187,15 @@ def casting_target(image: Image, preferred: Point | None = None, avoid: Point | 
             return None
         forward = (dx * vx + dy * vy) / length
         front_band = survey & (forward > radius * .25)
-        back_band = survey & (forward < -radius * .25)
-        if back_band.any() and float(surface[back_band].mean()) > .28:
-            return None
-        if not front_band.any() or float(surface[front_band].mean()) < .43:
+        if not front_band.any() or float(surface[front_band].mean()) < .23:
             return None
         eligible = (surface & (range_sq <= (radius * .85) ** 2) & (forward >= radius * .22)).astype(np.uint8)
         distance = cv2.distanceTransform(eligible, cv2.DIST_L2, 3)
         _, deep, _, (x, y) = cv2.minMaxLoc(distance)
         margin = max(8, radius * .075)
         if deep >= margin:
-            if avoid:
-                ax, ay = avoid[0] * width, avoid[1] * height
+            for rejected_point in rejected + ((avoid,) if avoid else ()):
+                ax, ay = rejected_point[0] * width, rejected_point[1] * height
                 nearby = (xx - ax) ** 2 + (yy - ay) ** 2 < (radius * .17) ** 2
                 other = distance.copy()
                 other[nearby] = 0

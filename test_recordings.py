@@ -189,6 +189,20 @@ class RecordedWorkflow(unittest.TestCase):
         self.assertIsNotNone(target)
         self.assertLess(target.point[1] * 550, 247)
 
+    def test_narrow_river_reroutes_rejected_casts_in_water(self) -> None:
+        scene = np.full((550, 680, 3), (24, 160, 65), np.uint8)
+        scene[155:225] = (207, 134, 20)
+        cv2.ellipse(scene, (305, 232), (15, 14), 0, 0, 360, (170, 50, 105), -1)
+        cv2.circle(scene, (305, 260), 145, (245, 248, 250), 3, cv2.LINE_AA)
+        first = casting_target(scene)
+        self.assertIsNotNone(first)
+        other = casting_target(scene, preferred=first.point, rejected=(first.point,))
+        self.assertIsNotNone(other)
+        self.assertNotEqual(first.point, other.point)
+        for target in (first, other):
+            self.assertTrue(155 < target.point[1] * 550 < 225)
+            self.assertLess(np.hypot(target.point[0] * 680 - 305, target.point[1] * 550 - 260), 145)
+
     def test_write_inputs_and_frames(self) -> None:
         base = self.base
 

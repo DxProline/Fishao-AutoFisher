@@ -29,7 +29,8 @@ class Activities:
     def __init__(self, ui: Interface) -> None:
         self.ui = ui
         self.log = logging.getLogger("fishao")
-        self.due = {Panel.MISSIONS: 0., Panel.TOURNAMENT: 5.}
+        self.due = {Panel.MISSIONS: 0., Panel.TOURNAMENT: 30.}
+        self.last_mission_catch = -8
         self.next_action = 0.
         self.opening_until = 0.
         self.previous: Action | None = None
@@ -41,7 +42,8 @@ class Activities:
     def reset_observation(self) -> None:
         self.previous = None
 
-    def tick(self, image: Image, ready: bool, now: float, controls: Controls, region: Region) -> str | None:
+    def tick(self, image: Image, ready: bool, now: float, controls: Controls, region: Region,
+             *, caught: int = 0) -> str | None:
         find = self.ui._find
         missions = find(image, "missions_title", (532, 37, 738, 96), .88)
         tournament = (
@@ -84,6 +86,8 @@ class Activities:
             ):
                 if now < self.due[panel]:
                     continue
+                if panel is Panel.MISSIONS and caught < self.last_mission_catch + 8:
+                    continue
                 anchor = find(image, key, area, .87)
                 if anchor is not None:
                     action = Action(f"Otevřít {panel.value}", anchor.point(*center))
@@ -92,6 +96,8 @@ class Activities:
         previous, self.previous = self.previous, action
         if action is not None:
             if action == previous and controls.click(region, *action.point):
+                if action.name == "Otevřít mise":
+                    self.last_mission_catch = caught
                 self._applied(action, now)
             return action.name
         return "Čekám na ověřený herní panel." if watching else None
@@ -127,7 +133,7 @@ class Activities:
             self.due[Panel.MISSIONS] = now + 120.
             self.opening_until = now + 3.
         elif action.name == "Otevřít turnaj":
-            self.due[Panel.TOURNAMENT] = now + 45.
+            self.due[Panel.TOURNAMENT] = now + 300.
             self.opening_until = now + 3.
         elif action.name == "Další mise":
             self.pages += 1

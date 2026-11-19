@@ -9,7 +9,8 @@ import numpy as np
 
 from activities import Activities, Panel
 from bot import Auto, Cycle, Phase
-from game_ui import EnergyShop, Hud, Interface, Inventory, Match, SIZE
+from game_ui import Hud, Interface, Inventory, Match, SIZE
+from progression import Progression
 from minigame import Balance, BalancePolicy
 from spots import CastTarget
 from window import Region
@@ -159,29 +160,6 @@ class AutoTest(unittest.TestCase):
         frame[332:339, 1159:1174] = frame[452:459, 1159:1174] = (125, 125, 125)
         self.assertIs(Interface.fishing_ready(frame, rod, bait), False)
 
-    def test_refill_confirms_quote_and_sends_one_purchase(self) -> None:
-        auto = Auto(xp_farm=True, buy_energy=True)
-        cycle = Cycle(phase=Phase.REFILL)
-        buy, close = (.70, .27), (.76, .13)
-        shop = EnergyShop(35, 35, 0, buy, close)
-        auto._refill(cycle, shop, False, 1., self.controls, self.region)
-        self.controls.click.assert_not_called()
-        auto._refill(cycle, shop, False, 2., self.controls, self.region)
-        self.controls.click.assert_called_once_with(self.region, *buy)
-        auto._refill(cycle, shop, False, 4., self.controls, self.region)
-        self.controls.click.assert_called_with(self.region, *close)
-        auto._refill(cycle, None, True, 5., self.controls, self.region)
-        self.assertEqual(cycle.phase, Phase.ENERGY)
-
-    def test_energy_switch_aborts_purchase_after_shop_has_opened(self) -> None:
-        auto = Auto(xp_farm=True, buy_energy=True)
-        cycle = Cycle(phase=Phase.REFILL)
-        shop = EnergyShop(100, 35, 0, (.70, .27), (.76, .13))
-        auto._refill(cycle, shop, False, 1., self.controls, self.region)
-        auto.set_energy_purchase(False)
-        auto._refill(cycle, shop, False, 2., self.controls, self.region)
-        self.controls.click.assert_called_once_with(self.region, *shop.close)
-
     def test_agent_opens_only_confirmed_panel_while_idle(self) -> None:
         ui = Interface()
         tile = ui.templates["missions_icon"]
@@ -211,17 +189,33 @@ class AutoTest(unittest.TestCase):
         agent.tick(self.frame, False, 2., self.controls, self.region)
         self.controls.click.assert_called_once_with(self.region, 986 / SIZE[0], 67 / SIZE[1])
 
-    def test_refill_closes_when_balance_energy_or_price_is_not_confirmed(self) -> None:
-        auto = Auto(xp_farm=True, buy_energy=True)
-        buy, close = (.70, .27), (.76, .13)
-        for balance, price, energy in ((34, 35, 0), (None, 35, 0), (40, 30, 0), (40, 35, 1), (40, 35, None)):
-            with self.subTest(balance=balance, price=price, energy=energy):
-                self.controls.reset_mock()
-                cycle = Cycle(phase=Phase.REFILL)
-                shop = EnergyShop(balance, price, energy, buy, close)
-                auto._refill(cycle, shop, False, 1., self.controls, self.region)
-                auto._refill(cycle, shop, False, 2., self.controls, self.region)
-                self.controls.click.assert_called_once_with(self.region, *close)
+    def test_agent_chooses_an_affordable_rod_and_preserves_reserve(self) -> None:
+        ui = Interface()
+        strategy = Progression(ui)
+        for key, x, y in (("supply_cash", 872, 102), ("simple_rod", 441, 168),
+                          ("big_rod", 441, 309), ("supply_price", 722, 241), ("supply_price", 722, 380)):
+            tile = ui.templates[key]
+            h, w = tile.shape[:2]
+            self.frame[y:y+h, x:x+w] = tile
+        for wallet, expected in ((620, 500), (529, 99), (128, None), (None, None)):
+            with self.subTest(wallet=wallet), patch.object(ui, "number", side_effect=[wallet, 500, 99]):
+                offer = strategy._supply(self.frame, "rod")
+                self.assertEqual(offer.cost if offer else None, expected)
+
+    def test_agent_changes_area_only_after_poor_results(self) -> None:
+        ui = Interface()
+        strategy = Progression(ui)
+        tile = ui.templates["world_icon"]
+        h, w = tile.shape[:2]
+        self.frame[617:617+h, 372:372+w] = tile
+        def tick(caught, now):
+            return strategy.tick(self.frame, ready=True, now=now, controls=self.controls, region=self.region,
+                                 missing=None, casts=18, caught=caught, escaped=0, rare_mission=False)
+        self.assertIsNone(tick(10, 1.))
+        self.assertIsNotNone(tick(2, 2.))
+        self.controls.click.assert_not_called()
+        tick(2, 3.)
+        self.controls.click.assert_called_once()
 
     def test_autofish_recasts_after_long_wait_and_after_result(self) -> None:
         auto = Auto()

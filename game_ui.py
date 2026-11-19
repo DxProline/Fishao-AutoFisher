@@ -44,24 +44,18 @@ class Inventory:
     page: tuple[int, int] | None
 
 
-@dataclass(frozen=True, slots=True)
-class EnergyShop:
-    balance: int | None
-    price: int | None
-    energy: int | None
-    buy: Point | None
-    close: Point | None
-
-
 class Interface:
     def __init__(self) -> None:
         self.templates = {key: self._image(ROOT / f"{key}.png") for key in
                           ("energy", "rod", "bait", "inventory", "select", "select_hover",
-                           "caught", "escaped", "fishdex_button", "result_x", "energy_plus",
-                           "energy_shop", "energy_cash", "energy_price_cash", "energy_offer_five",
+                           "caught", "escaped", "fishdex_button", "result_x",
                            "missions_icon", "missions_title", "missions_next", "mission_rare_fish",
                            "tournament_icon", "tournament_podium", "tournament_start", "tournament_countdown", "activity_close",
-                           "tournament_coin", "tournament_signup", "wallet_coin")}
+                           "tournament_coin", "tournament_signup", "wallet_coin",
+                           "world_icon", "world_title", "trout_destination", "trout_spawn",
+                           "supply_icon", "supply_title", "supply_cash", "simple_rod", "big_rod",
+                           "supply_price", "bait_tab", "rod_tab", "worms_bait", "bait_price", "shop_close",
+                           "line_icon", "line_title", "line_upgrade")}
         # Porovnáváme vnitřek blesku. Okraje obsahují průhledné pozadí mapy.
         lightning = cv2.cvtColor(self.templates["energy"], cv2.COLOR_BGR2HSV)
         self.energy_mask = cv2.erode(cv2.inRange(lightning, (75, 125, 130), (110, 255, 255)),
@@ -142,25 +136,6 @@ class Interface:
             return None
         height, width = self.templates["result_x"].shape[:2]
         return match.point(width // 2, height // 2)
-
-    def energy_button(self, image: Image) -> Point | None:
-        match = self._find(image, "energy_plus", (596, 12, 634, 46), .85)
-        return match.point(9, 10) if match else None
-
-    def energy_shop(self, image: Image) -> EnergyShop | None:
-        if self._find(image, "energy_shop", (430, 79, 830, 149), .88) is None:
-            return None
-        funds = self._find(image, "energy_cash", (632, 538, 705, 590), .86)
-        button = self._find(image, "energy_price_cash", (803, 156, 866, 211), .86)
-        offer = self._find(image, "energy_offer_five", (385, 156, 525, 211), .88)
-        close = self._find(image, "result_x", (932, 73, 981, 116), .83)
-        balance = self.number(image[555:580, 690:763], white=False, max_digits=6) if funds else None
-        price = self.number(image[172:197, 863:910], white=True) if button else None
-        # Nabídka ztmaví počítadlo. Zvýšíme kontrast políčka s energií.
-        energy_cell = image[19:39, 558:601]
-        energy = self.number(cv2.convertScaleAbs(energy_cell, alpha=1.45), white=False)
-        return EnergyShop(balance, price, energy, button.point(69, 18) if button and offer else None,
-                          close.point(13, 13) if close else None)
 
     @staticmethod
     def fishing_ready(image: Image, rod: Match, bait: Match) -> bool | None:
