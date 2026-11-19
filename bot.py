@@ -7,7 +7,7 @@ from time import perf_counter
 
 from activities import Activities
 from assist import TARGET_HZ, TRACK_MISSES, Assist
-from controls import Controls
+from controls import BackgroundControls, Controls
 from game_ui import EnergyShop, Hud, Interface, Inventory, Point
 from minigame import BalanceDetector, BalancePolicy, PixelBox
 from recorder import NS
@@ -85,8 +85,9 @@ class Cycle:
 class Auto(Assist):
     """Opakování ověřených akcí nad obrazem hry, v samostatném vlákně."""
 
-    def __init__(self, *, xp_farm: bool = False, buy_energy: bool = False, agent: bool = False) -> None:
-        super().__init__()
+    def __init__(self, *, xp_farm: bool = False, buy_energy: bool = False, agent: bool = False,
+                 background: bool = False) -> None:
+        super().__init__(background=background)
         self.xp_farm = xp_farm
         self.name = "Agent Fishao" if agent else "XP Farm" if xp_farm else "AutoFish"
         self.agent = agent
@@ -274,6 +275,8 @@ class Auto(Assist):
                 if balance:
                     self._annotate(preview,balance,selected_crop)
                 self._update(preview=(round(tick*NS),preview))
+            if isinstance(controls, BackgroundControls) and controls.problem:
+                message = controls.problem
             self._update(text=message,casts=cycle.casts,caught=cycle.caught,escaped=cycle.escaped,
                          active_ns=round(active*NS), tracking_fps=tracking_fps)
             interval = 1/TARGET_HZ if crop else .06

@@ -5,6 +5,7 @@ from ctypes import wintypes
 from time import sleep
 
 import win32api
+import win32con
 import win32gui
 
 from window import Region
@@ -131,4 +132,98 @@ class Controls:
         finally:
             self._inputs(up)
         return True
+
+
+class BackgroundControls(Controls):
+    """Události doručuje výhradně do fronty okna hry."""
+
+    def __init__(self, title: str) -> None:
+        self.title = title
+        self.held: str | None = None
+        self._held_window = 0
+        self._hovered: tuple[Region, int] | None = None
+        self.problem: str | None = None
+
+    def _game_window(self, hwnd: int) -> bool:
+        try:
+            return bool(hwnd and win32gui.IsWindow(hwnd) and win32gui.GetWindowText(hwnd) == self.title)
+        except win32gui.error:
+            return False
+
+    def _post(self, hwnd: int, message: int, key: int, data: int) -> bool:
+        if not self._game_window(hwnd):
+            return False
+        try:
+            win32gui.PostMessage(hwnd, message, key, data)
+        except win32gui.error:
+            self.problem = "Windows zamítl přímý vstup do okna hry. Zkus běžný režim nebo stejná oprávnění obou aplikací."
+            return False
+        self.problem = None
+        return True
+
+    def _point(self, region: Region, x: float, y: float) -> int | None:
+        if not (0 <= x < 1 and 0 <= y < 1) or not self._game_window(region.hwnd):
+            return None
+        try:
+            if win32gui.IsIconic(region.hwnd) or win32gui.GetClientRect(region.hwnd)[2:] != (region.width, region.height):
+                return None
+        except win32gui.error:
+            return None
+        return int(x * region.width) | (int(y * region.height) << 16)
+
+    def pointer_at(self, region: Region, x: float, y: float) -> bool:
+        point = self._point(region, x, y)
+        if point is None or self._hovered is None or self._hovered[0] != region:
+            return False
+        previous = self._hovered[1]
+        return abs((point & 0xFFFF) - (previous & 0xFFFF)) <= 2 and abs((point >> 16) - (previous >> 16)) <= 2
+
+    def hover(self, region: Region, x: float, y: float) -> bool:
+        point = self._point(region, x, y)
+        if point is None or not self._post(region.hwnd, win32con.WM_MOUSEMOVE, 0, point):
+            self._hovered = None
+            return False
+        self._hovered = (region, point)
+        return True
+
+    def click(self, region: Region, x: float, y: float) -> bool:
+        point = self._point(region, x, y)
+        if point is None or not self.hover(region, x, y):
+            return False
+        if not self._post(region.hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, point):
+            return False
+        sleep(.055)
+        return self._post(region.hwnd, win32con.WM_LBUTTONUP, 0, point)
+
+    def _key(self, hwnd: int, key: int, scan: int, *, up: bool, extended: bool = False) -> bool:
+        data = 1 | scan << 16 | (1 << 24 if extended else 0) | (0xC0000000 if up else 0)
+        message = win32con.WM_KEYUP if up else win32con.WM_KEYDOWN
+        return self._post(hwnd, message, key, data)
+
+    def release(self) -> None:
+        if self.held is not None:
+            vk = win32con.VK_LEFT if self.held == "left" else win32con.VK_RIGHT
+            if self._key(self._held_window, vk, self._SCANS[self.held], up=True, extended=True):
+                self.held = None
+            elif not self._game_window(self._held_window):
+                self.held = None
+
+    def direction(self, hwnd: int, requested: str | None) -> None:
+        if requested == self.held and hwnd == self._held_window:
+            return
+        self.release()
+        if requested is None or self.held is not None or not self._game_window(hwnd) or win32gui.IsIconic(hwnd):
+            return
+        vk = win32con.VK_LEFT if requested == "left" else win32con.VK_RIGHT
+        if self._key(hwnd, vk, self._SCANS[requested], up=False, extended=True):
+            self.held = requested
+            self._held_window = hwnd
+
+    def escape(self, hwnd: int) -> bool:
+        if not self._game_window(hwnd) or win32gui.IsIconic(hwnd):
+            return False
+        if not self._key(hwnd, win32con.VK_ESCAPE, 0x01, up=False):
+            return False
+        sleep(.075)
+        return self._key(hwnd, win32con.VK_ESCAPE, 0x01, up=True)
 

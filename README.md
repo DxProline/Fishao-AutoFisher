@@ -88,6 +88,10 @@ Volba **Automaticky kupovat energii za herní bankovky** je po otevření aplika
 
 Před spuštěním lovu zapni **Agent · kontrolovat mise a turnaje** v aplikaci. Příkaz `--agent` tuto volbu předvybere. Mezi hody agent projde obrazovku misí a u rozpoznané mise na čtyřhvězdičkovou rybu pokračuje v lovu. U známého turnajového panelu filtruje přihlášku podle stavu registrace a dostupných herních mincí. Při neověřené registraci zavře panel a pokračuje v běžném lovu. Agent neotevírá chat ani neposílá zprávy. Obchody s výbavou, přesuny do placených zón a samostatné postupy pro ostatní mise zatím vyžadují hráče.
 
+### Hra v překrytém okně
+
+Před spuštěním zaškrtni **Pracovat v překrytém okně hry**. Fishao nech otevřené a překryj jej prohlížečem nebo jiným oknem. Tento režim snímá klientskou plochu Fishao a předává kliknutí a šipky přímo hře. Skutečná myš zůstává volná. Při minimalizaci Fishao automat počká na obnovení okna. Režim závisí na tom, zda spuštěná hra přijímá zprávy o vstupu na pozadí. Pokud přímý vstup selže, můžeš po zastavení zvolit běžný režim.
+
 Pohyb postavy k vodě zajišťuje hráč. Hra a automat musí mít stejnou úroveň oprávnění Windows. Rozpoznávání bylo ověřené na skutečných snímcích úlovku, úniku a inventáře. Průchod AutoFish a rychlé změny směru byly testované simulací. Celý automatický průchod ve hře je třeba ověřit prvním hlídaným spuštěním. Probíhající hod může skončit i bez úlovku. AutoFish se řídí stavem hry a při nejasném obraze vyčkává.
 
 Testy balíčku spusť příkazem `& $python -B -m unittest -v`.

@@ -47,6 +47,7 @@ class App:
         self.xp_farm = xp_farm
         self.agent = tk.BooleanVar(master=root, value=agent)
         self.buy_energy = tk.BooleanVar(master=root, value=False)
+        self.background = tk.BooleanVar(master=root, value=False)
         self.autofish = autofish
         self.action_name = ("XP Farm" if xp_farm else "AutoFish") if autofish else "asistenci" if assist else "záznam"
         self.title = f"Fishao {self.action_name}" if autofish else "Fishao Asistence" if assist else "Fishao Záznamník"
@@ -97,6 +98,12 @@ class App:
         style.map("TButton", background=[("active", "#295163")], foreground=[("disabled", "#88a2ab")])
         style.configure("Start.TButton", background=ACCENT, foreground=BG)
         style.map("Start.TButton", background=[("disabled", PANEL), ("active", "#8aebd5")])
+        style.configure("Options.TCheckbutton", background=BG, foreground=INK, focuscolor=MUTED,
+                        indicatorcolor=PANEL, bordercolor=MUTED, padding=(2, 3))
+        style.map("Options.TCheckbutton",
+                  background=[("active", PANEL), ("focus", BG)],
+                  foreground=[("disabled", MUTED)],
+                  indicatorcolor=[("disabled", PANEL), ("selected", ACCENT)])
         style.configure("TNotebook", background=BG, borderwidth=0)
         style.configure("TNotebook.Tab", background=PANEL, foreground=MUTED, padding=(15, 7))
         style.map("TNotebook.Tab", background=[("selected", "#284c5e")], foreground=[("selected", INK)])
@@ -122,10 +129,15 @@ class App:
         ttk.Label(bar, text=mode, style="Muted.TLabel").pack(side="right")
         if self.autofish:
             ttk.Checkbutton(shell, text="Automaticky kupovat energii za herní bankovky",
-                            variable=self.buy_energy, command=self._update_energy_purchase).pack(anchor="w", pady=(0, 10))
+                            variable=self.buy_energy, command=self._update_energy_purchase,
+                            style="Options.TCheckbutton").pack(anchor="w", pady=(0, 10))
             self.agent_option = ttk.Checkbutton(shell, text="Agent · kontrolovat mise a turnaje",
-                                                variable=self.agent)
+                                                variable=self.agent, style="Options.TCheckbutton")
             self.agent_option.pack(anchor="w", pady=(0, 10))
+            self.background_option = ttk.Checkbutton(shell, text="Pracovat v překrytém okně hry",
+                                                     variable=self.background, style="Options.TCheckbutton",
+                                                     command=self._update_preview_hint)
+            self.background_option.pack(anchor="w", pady=(0, 10))
 
         cards = ttk.Frame(shell)
         cards.pack(fill="x", pady=(0, 10))
@@ -152,8 +164,9 @@ class App:
         self.canvas = tk.Canvas(preview_tab, bg="#0b151d", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
         self.canvas_message = self.canvas.create_text(
-            0, 0, fill=MUTED, text=f"Spusť {self.action_name} a přepni do FISHAO - Reborn.", font=("Segoe UI", 11),
+            0, 0, fill=MUTED, font=("Segoe UI", 11),
         )
+        self._update_preview_hint()
         self.canvas_image = self.canvas.create_image(0, 0)
         self.canvas.bind("<Configure>", self._resize_preview)
         self.log_view = tk.Text(log_tab, bg=PANEL, fg=INK, relief="flat", wrap="word",
@@ -169,6 +182,11 @@ class App:
         for item in (self.canvas_message, self.canvas_image):
             self.canvas.coords(item, event.width // 2, event.height // 2)
         self._render_preview()
+
+    def _update_preview_hint(self) -> None:
+        hint = ("nech otevřené okno FISHAO - Reborn" if self.background.get()
+                else "přepni do FISHAO - Reborn")
+        self.canvas.itemconfigure(self.canvas_message, text=f"Spusť {self.action_name} a {hint}.")
 
     def _render_preview(self) -> None:
         image = self.preview_frame
@@ -199,6 +217,7 @@ class App:
                                    state="normal" if active and not stopping else "disabled")
         if self.autofish:
             self.agent_option.configure(state="disabled" if active else "normal")
+            self.background_option.configure(state="disabled" if active else "normal")
 
     def toggle(self) -> None:
         if self.closing:
@@ -212,7 +231,8 @@ class App:
             self.canvas.itemconfigure(self.canvas_image, image="")
             self.canvas.itemconfigure(self.canvas_message, state="normal")
             if self.autofish:
-                self.recorder = Auto(xp_farm=self.xp_farm, buy_energy=self.buy_energy.get(), agent=self.agent.get())
+                self.recorder = Auto(xp_farm=self.xp_farm, buy_energy=self.buy_energy.get(), agent=self.agent.get(),
+                                     background=self.background.get())
             else:
                 self.recorder = Assist(self.cast_once) if self.assist else Recorder(
                     self.output_dir, self.fps, image_format=self.image_format)
