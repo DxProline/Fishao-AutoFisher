@@ -186,7 +186,8 @@ class Assist(threading.Thread):
                     if spot is not None and not self.stopping and not self.paused:
                         if not controls.pointer_at(region, *spot.point):
                             controls.hover(region, *spot.point)
-                        elif spot.agrees(last_spot) and controls.click(region, *spot.point):
+                        elif spot.agrees(last_spot) and controls.cast(
+                                region, *spot.point, cancelled=lambda: self.stopping or self.paused):
                             throw_time = active
                             self._log.info("Proveden jeden zkušební hod.")
                     last_spot = spot

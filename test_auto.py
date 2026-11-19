@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 from itertools import count
-from unittest.mock import Mock, call, patch
+from unittest.mock import ANY, Mock, call, patch
 
 import cv2
 import numpy as np
@@ -10,7 +10,7 @@ import win32con
 
 from activities import Action, Activities, Panel
 from bot import Auto, Cycle, Phase
-from controls import BackgroundControls
+from controls import BackgroundControls, Controls
 from game_ui import EnergyShop, Hud, Interface, Inventory, Match, SIZE
 from progression import Progression
 from minigame import Balance, BalanceDetector, BalancePolicy
@@ -31,14 +31,14 @@ class AutoTest(unittest.TestCase):
         empty = Hud(0,7,12,True,available,available)
         self.auto._ready(self.cycle,empty,self.frame,0.,self.controls,self.region)
         self.assertEqual(self.cycle.phase,Phase.ENERGY)
-        self.controls.click.assert_not_called()
+        self.controls.cast.assert_not_called()
         good = Hud(1,7,12,True,available,available)
         with patch("bot.casting_target",return_value=CastTarget((.4,.2),(.4,.3),.15,.54)):
             self.auto._ready(self.cycle,good,self.frame,2.,self.controls,self.region)
-            self.controls.click.assert_not_called()
+            self.controls.cast.assert_not_called()
             self.auto._ready(self.cycle,good,self.frame,3.,self.controls,self.region)
         self.assertEqual(self.cycle.phase,Phase.CAST)
-        self.controls.click.assert_called_once_with(self.region,.4,.2)
+        self.controls.cast.assert_called_once_with(self.region, .4, .2, cancelled=ANY)
 
     def test_changes_equipment_only_after_inventory_and_verifies_hud(self) -> None:
         rod,bait = (.91,.5),(.91,.7)
@@ -67,9 +67,9 @@ class AutoTest(unittest.TestCase):
         with patch("bot.casting_target", side_effect=(small, large, large)):
             self.auto._ready(self.cycle, hud, self.frame, 1., self.controls, self.region)
             self.auto._ready(self.cycle, hud, self.frame, 2., self.controls, self.region)
-            self.controls.click.assert_not_called()
+            self.controls.cast.assert_not_called()
             self.auto._ready(self.cycle, hud, self.frame, 3., self.controls, self.region)
-        self.controls.click.assert_called_once_with(self.region, *large.point)
+        self.controls.cast.assert_called_once_with(self.region, *large.point, cancelled=ANY)
 
     def test_cast_waits_until_pointer_is_over_confirmed_water(self) -> None:
         p = (.43, .35)
@@ -79,10 +79,10 @@ class AutoTest(unittest.TestCase):
         with patch("bot.casting_target", return_value=target):
             self.auto._ready(self.cycle, hud, self.frame, 1., self.controls, self.region)
             self.auto._ready(self.cycle, hud, self.frame, 1.1, self.controls, self.region)
-            self.controls.click.assert_not_called()
+            self.controls.cast.assert_not_called()
             self.auto._ready(self.cycle, hud, self.frame, 1.2, self.controls, self.region)
         self.assertEqual(self.controls.hover.call_count, 2)
-        self.controls.click.assert_called_once_with(self.region, *p)
+        self.controls.cast.assert_called_once_with(self.region, *p, cancelled=ANY)
 
     def test_missing_circle_uses_hover_only_until_two_confirmations(self) -> None:
         p = (.43, .35)
@@ -91,10 +91,41 @@ class AutoTest(unittest.TestCase):
         with patch("bot.casting_target", side_effect=(None, None, target, target)), patch("bot.casting_hover", return_value=p):
             for stamp in (1., 1.5, 2.1):
                 self.auto._ready(self.cycle, hud, self.frame, stamp, self.controls, self.region)
-                self.controls.click.assert_not_called()
+                self.controls.cast.assert_not_called()
             self.auto._ready(self.cycle, hud, self.frame, 2.2, self.controls, self.region)
         self.controls.hover.assert_called_once_with(self.region, *p)
-        self.controls.click.assert_called_once_with(self.region, *p)
+        self.controls.cast.assert_called_once_with(self.region, *p, cancelled=ANY)
+
+    def test_cast_sends_two_mouse_presses_in_both_input_modes(self) -> None:
+        region, point = self.region, (.43, .35)
+        with patch("controls.sleep") as delay:
+            foreground = Controls()
+            with (
+                patch("controls.win32gui.GetForegroundWindow", return_value=region.hwnd),
+                patch.object(foreground, "_pointer_move", return_value=object()),
+                patch.object(foreground, "pointer_at", return_value=True),
+                patch.object(foreground, "_inputs") as inputs,
+            ):
+                self.assertTrue(foreground.cast(region, *point, cancelled=lambda: False))
+                flags = [entry.args[0].value.mouse.flags for entry in inputs.call_args_list]
+                self.assertEqual(flags, [2, 4, 2, 4])
+            self.assertEqual(delay.call_args_list, [call(.055), call(.035), call(.055)])
+
+            background = BackgroundControls("FISHAO - Reborn")
+            packed = 275 | (190 << 16)
+            with patch.object(background, "_point", return_value=packed), patch.object(background, "_post") as post:
+                self.assertTrue(background.cast(region, *point, cancelled=lambda: False))
+                self.assertEqual(post.call_args_list, [
+                    call(region.hwnd, win32con.WM_MOUSEMOVE, 0, packed),
+                    call(region.hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, packed),
+                    call(region.hwnd, win32con.WM_LBUTTONUP, 0, packed),
+                ] * 2)
+
+    def test_cast_keeps_first_attempt_when_second_press_is_cancelled(self) -> None:
+        controls = Controls()
+        with patch("controls.sleep"), patch.object(controls, "click", return_value=True) as click:
+            self.assertTrue(controls.cast(self.region, .43, .35, cancelled=Mock(side_effect=(False, True))))
+            click.assert_called_once_with(self.region, .43, .35)
 
     def test_result_matching_at_different_sizes(self) -> None:
         ref = Interface()
@@ -269,7 +300,7 @@ class AutoTest(unittest.TestCase):
                 auto._ready(self.cycle, hud, self.frame, 4., self.controls, self.region)
                 self.assertEqual(self.controls.click.call_count, 1)
                 auto._ready(self.cycle, hud, self.frame, 5., self.controls, self.region)
-            self.controls.click.assert_called_with(self.region, *water)
+            self.controls.cast.assert_called_once_with(self.region, *water, cancelled=ANY)
             self.assertEqual(self.cycle.phase, Phase.CAST)
 
     def test_farm_energy_purchase_requires_confirmed_offer_and_reserve(self) -> None:
@@ -329,15 +360,18 @@ class AutoTest(unittest.TestCase):
 
         close_frames = []
 
-        def click(region, x, y):
-            if (x, y) == close_button:
-                close_frames.append(len(states_seen))
-                return True
+        def cast(region, x, y, *, cancelled):
             input_frames.append(len(states_seen))
             if len(input_frames) == 3:
                 auto.stop()
             return True
 
+        def click(region, x, y):
+            self.assertEqual((x, y), close_button)
+            close_frames.append(len(states_seen))
+            return True
+
+        self.controls.cast.side_effect = cast
         self.controls.click.side_effect = click
         self.controls.escape.return_value = True
         with (

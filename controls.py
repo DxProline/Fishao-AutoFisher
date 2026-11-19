@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+from collections.abc import Callable
 from ctypes import wintypes
 from time import sleep
 
@@ -119,6 +120,16 @@ class Controls:
             sleep(.055)
         finally:
             self._inputs(up)
+        return True
+
+    def cast(self, region: Region, x: float, y: float, *, cancelled: Callable[[], bool]) -> bool:
+        """Dva stisky na stejném místě. První odeslaný klik už zahájil pokus."""
+        if cancelled() or not self.click(region, x, y):
+            return False
+        # Dej hře alespoň jeden snímek na zpracování uvolnění tlačítka.
+        sleep(.035)
+        if not cancelled() and self.pointer_at(region, x, y):
+            self.click(region, x, y)
         return True
 
     def escape(self, hwnd: int) -> bool:
