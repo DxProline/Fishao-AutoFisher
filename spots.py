@@ -29,13 +29,29 @@ class CastTarget:
                 and distance(self.point, previous.point) <= .16 * tolerance)
 
 
+def paid_pond(hsv: Image) -> np.ndarray:
+    """Olivová voda uvnitř ohrady farmy s černými pruhy po stranách."""
+    height, width = hsv.shape[:2]
+    top, bottom = int(.30 * height), int(.46 * height)
+    west = hsv[top:bottom, int(.065 * width):int(.115 * width), 2]
+    east = hsv[top:bottom, int(.89 * width):int(.94 * width), 2]
+    if min(west.size, east.size) == 0 or min(np.mean(west < 32), np.mean(east < 32)) < .80:
+        return np.zeros((height, width), np.uint8)
+    olive = cv2.inRange(hsv, (23, 56, 65), (35, 228, 218))
+    pond = olive[int(.10 * height):int(.45 * height), int(.38 * width):int(.62 * width)]
+    if not pond.size or np.mean(pond != 0) < .70:
+        return np.zeros_like(olive)
+    yy, xx = np.ogrid[:height, :width]
+    return np.where((xx >= .26 * width) & (xx < .75 * width) & (yy < .60 * height), olive, 0).astype(np.uint8)
+
+
 def _open_water(hsv: Image) -> np.ndarray:
     # Noční filtr barví i písek do modra, ale moře má v záznamu vyšší sytost.
     sea = cv2.inRange(hsv, (76, 54, 75), (95, 255, 255))
     deep_sea = cv2.inRange(hsv, (96, 86, 75), (124, 255, 255))
     shallow = cv2.inRange(hsv, (47, 16, 145), (95, 92, 255))
     kernel = np.ones((7, 7), np.uint8)
-    seeds = cv2.bitwise_or(sea, deep_sea)
+    seeds = cv2.bitwise_or(cv2.bitwise_or(sea, deep_sea), paid_pond(hsv))
     water = cv2.morphologyEx(cv2.bitwise_or(seeds, shallow), cv2.MORPH_OPEN, kernel)
     # Světlý kruh může rozdělit vodní plochu. Spojení slouží jen k označení plochy.
     joined = cv2.morphologyEx(water, cv2.MORPH_CLOSE, kernel)
@@ -45,6 +61,22 @@ def _open_water(hsv: Image) -> np.ndarray:
     accepted = (stats[:, cv2.CC_STAT_AREA] >= minimum) & (seeded >= water.size * .010)
     accepted[0] = False
     return accepted[labels] & (water != 0)
+
+
+def timed_farm(image: Image) -> tuple[bool, bool]:
+    """Vrací rozpoznání placené farmy a dostatečně dlouhou zelenou část odpočtu."""
+    frame = _scene(image)
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    if not paid_pond(hsv).any():
+        return False, False
+    height, width = hsv.shape[:2]
+    footer = hsv[int(.210 * height):int(.227 * height), int(.140 * width):int(.249 * width)]
+    beige = cv2.inRange(footer, (11, 24, 145), (41, 155, 255))
+    if np.mean(beige != 0) < .42:
+        return True, False
+    box = hsv[int(.172 * height):int(.206 * height), int(.13 * width):int(.254 * width)]
+    green = cv2.inRange(box, (38, 95, 65), (88, 255, 255))
+    return True, bool(np.count_nonzero(green) >= .34 * green.size)
 
 
 def _circles(gray: np.ndarray, avatars: list[tuple[float, float, int, int]]) -> list[tuple[float, float, float, float]]:
@@ -108,12 +140,23 @@ def _castable_view(width: int, height: int) -> np.ndarray:
             & ~((xx >= .20 * width) & (xx <= .70 * width) & (yy >= .85 * height)))
 
 
+def _shore_avatars(hsv: Image) -> list[tuple[float, float, int, int]]:
+    avatars = _avatars(hsv)
+    if len(avatars) <= 1:
+        return avatars
+    height, width = hsv.shape[:2]
+    # V tažené kameře je hráč u středu. Malé fialové květy a HUD ignoruj.
+    central = [a for a in avatars if .32 * width <= a[0] <= .68 * width
+               and .25 * height <= a[1] <= .72 * height and a[3] >= .032 * height]
+    return central or avatars
+
+
 def casting_hover(image: Image, attempt: int = 0) -> Point | None:
     """Najde vodu u postavy pro najetí kurzorem, samostatně nepotvrzuje hod."""
     frame = _scene(image)
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     height, width = hsv.shape[:2]
-    avatars = _avatars(hsv)
+    avatars = _shore_avatars(hsv)
     if not avatars:
         return None
     depth = cv2.distanceTransform((_open_water(hsv) & _castable_view(width, height)).astype(np.uint8), cv2.DIST_L2, 3)
@@ -145,7 +188,7 @@ def shore_approach(image: Image) -> Point | None:
     frame = _scene(image)
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     height, width = hsv.shape[:2]
-    avatars = _avatars(hsv)
+    avatars = _shore_avatars(hsv)
     if len(avatars) != 1:
         return None
     x, y, _, hat = avatars[0]
@@ -161,7 +204,7 @@ def shore_approach(image: Image) -> Point | None:
     row, col = np.unravel_index(np.where(near, distance, np.inf).argmin(), depth.shape)
     direction = np.array((col, row)) - feet
     length = float(np.linalg.norm(direction))
-    if not .85 * hat < length <= 8 * hat:
+    if not .85 * hat < length <= 12 * hat:
         return None
     # Zastav na suché straně hranice, i když je u břehu jen úzký pás vody.
     path = np.rint(np.linspace(feet, feet + direction, max(2, round(length)))).astype(int)

@@ -44,7 +44,9 @@ def install(project: Path, desktop: Path, patch: Path, version: str) -> Path:
     link.TargetPath = str(interpreter)
     link.Arguments = subprocess.list2cmdline([str(launch), "--agent"])
     link.WorkingDirectory = str(project)
-    link.IconLocation = f"{interpreter},0"
+    tkinter_dlls = sorted((Path(sys.base_prefix) / "DLLs").glob("tk*.dll"))
+    icon = tkinter_dlls[0] if tkinter_dlls else interpreter
+    link.IconLocation = f"{icon},0"
     link.Description = f"Fishao Agent {version}"
     link.Save()
     return target

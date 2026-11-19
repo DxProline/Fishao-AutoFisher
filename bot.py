@@ -7,11 +7,11 @@ from time import perf_counter
 from activities import Activities
 from assist import TARGET_HZ, TRACK_MISSES, Assist
 from controls import BackgroundControls, Controls
-from game_ui import Hud, Interface, Inventory, Point
+from game_ui import EnergyShop, Hud, Interface, Inventory, Point
 from minigame import BalanceDetector, BalancePolicy, PixelBox
 from progression import Progression
 from recorder import NS
-from spots import CastTarget, casting_hover, casting_target, shore_approach
+from spots import CastTarget, casting_hover, casting_target, shore_approach, timed_farm
 from window import FrameUnavailable, Image, Region, WindowCapture
 
 
@@ -23,6 +23,7 @@ class Phase(str, Enum):
     RESULT = "Čekám na výsledek"
     CLOSE = "Zavírám výsledek"
     ENERGY = "Čekám na dobití energie"
+    REFILL = "Ověřuji doplnění energie na farmě"
     GEAR = "Vybírám vybavení"
 
 
@@ -55,6 +56,10 @@ class Cycle:
     select_attempts: int = 0
     original_energy: int | None = None
     attempt_pending: bool = False
+    farm_checked: bool = False
+    farm_missing_frames: int = 0
+    quote: EnergyShop | None = None
+    refill_sent: bool = False
 
     def confirm_cast(self) -> None:
         if self.phase is Phase.CAST:
@@ -156,7 +161,7 @@ class Auto(Assist):
             selected_crop = crop
             captured_at = perf_counter()
             balance = (detector.analyze_crop(frame, crop[0], crop[1]) if crop else detector.analyze(frame)
-                       ) if cycle.phase not in (Phase.CLOSE, Phase.GEAR, Phase.ENERGY) else None
+                       ) if cycle.phase not in (Phase.CLOSE, Phase.GEAR, Phase.ENERGY, Phase.REFILL) else None
             direction = policy.choose(balance, captured_at)
             if self.stopping or self.paused:
                 continue
@@ -201,6 +206,11 @@ class Auto(Assist):
                     self._log.info("Výsledek: %s. Úlovky: %s.", result, cycle.caught)
                 inventory = ui.inventory(image)
                 hud = ui.hud(image)
+                farm, farm_time = timed_farm(image) if self.agent and cycle.phase in (Phase.READY, Phase.ENERGY) else (False, False)
+                if cycle.phase in (Phase.READY, Phase.ENERGY) and hud and hud.ready is True and not inventory and not result:
+                    cycle.farm_missing_frames = 0 if farm else cycle.farm_missing_frames + 1
+                    if cycle.farm_missing_frames >= 4:
+                        cycle.farm_checked = False
                 ready = hud is not None and hud.ready is True and inventory is None and result is None
                 busy = hud is not None and hud.ready is False and inventory is None and result is None
                 ready_frames = ready_frames + 1 if ready else 0
@@ -213,7 +223,9 @@ class Auto(Assist):
                     cycle.shore_step = None
                 if self.stopping or self.paused:
                     continue
-                if cycle.phase is Phase.GEAR:
+                if cycle.phase is Phase.REFILL:
+                    self._farm_refill(cycle, ui.energy_shop(image), ready, active, controls, region)
+                elif cycle.phase is Phase.GEAR:
                     self._gear(cycle, inventory, hud, active, controls, region)
                     if (progression and cycle.gear_step == "unavailable" and inventory
                             and active >= progression.recheck_shop and controls.click(region, *inventory.close)):
@@ -253,7 +265,7 @@ class Auto(Assist):
                         cycle.finish_attempt(active)
                         cycle.advance(Phase.READY,active)
                 activity = None
-                if (activities and cycle.phase in (Phase.READY, Phase.ENERGY)
+                if (activities and not farm and cycle.phase in (Phase.READY, Phase.ENERGY)
                         and not inventory and not result
                         and not self.stopping and not self.paused):
                     if progression:
@@ -277,6 +289,15 @@ class Auto(Assist):
                     shore_status = self._ready(cycle,hud,frame,active,controls,region)
                     if shore_status:
                         activity = shore_status
+                    if (farm_time and cycle.phase is Phase.ENERGY and not cycle.farm_checked
+                            and hud.rod is not None and hud.rod >= 5 and hud.bait is not None and hud.bait >= 5):
+                        button = ui.energy_button(image)
+                        if button and controls.click(region, *button):
+                            cycle.farm_checked = True
+                            cycle.quote = None
+                            cycle.refill_sent = False
+                            cycle.advance(Phase.REFILL, active)
+                            cycle.next_action = active + .45
                 message = cycle.phase.value
                 if hud and cycle.phase in (Phase.READY, Phase.ENERGY, Phase.WAIT):
                     message += f" · energie {hud.energy if hud.energy is not None else '?'}"
@@ -329,7 +350,7 @@ class Auto(Assist):
             preferred = cycle.candidate.point if cycle.candidate else cycle.preferred()
             target = casting_target(frame, preferred, avoid=cycle.position, rejected=tuple(cycle.rejected))
             cycle.next_scan = now if target is not None else now + .2
-            if (target is None and self.agent and cycle.shore_moves < 3
+            if (target is None and self.agent and cycle.shore_moves < 5
                     and not self.stopping and not self.paused):
                 step = shore_approach(frame)
                 previous, cycle.shore_step = cycle.shore_step, step
@@ -359,6 +380,27 @@ class Auto(Assist):
                     self._log.info("Klik na vodu v kruhu dosahu: %.3f, %.3f.", *target.point)
             cycle.candidate = target
         return None
+
+    def _farm_refill(self, cycle: Cycle, shop: EnergyShop | None, ready: bool, now: float,
+                     controls: Controls, region: Region) -> None:
+        if now < cycle.next_action or self.stopping or self.paused:
+            return
+        if shop is None:
+            cycle.quote = None
+            if ready:
+                cycle.advance(Phase.ENERGY, now)
+            return
+        previous, cycle.quote = cycle.quote, shop
+        if previous != shop:
+            return
+        if (not cycle.refill_sent and shop.energy == 0 and shop.price == 35
+                and shop.balance is not None and shop.balance >= 135 and shop.buy is not None):
+            if controls.click(region, *shop.buy):
+                cycle.refill_sent = True
+                cycle.next_action = now + 1.
+                self._log.info("Placená farma: odeslán nákup 5 energie za 35 bankovek.")
+        elif shop.close and controls.click(region, *shop.close):
+            cycle.next_action = now + .45
 
     def _gear(self, cycle: Cycle, inv: Inventory | None, hud: Hud | None, now: float,
               controls: Controls, region: Region) -> str | None:

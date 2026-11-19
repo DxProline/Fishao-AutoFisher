@@ -9,7 +9,7 @@ import numpy as np
 
 from activities import Activities, Panel
 from bot import Auto, Cycle, Phase
-from game_ui import Hud, Interface, Inventory, Match, SIZE
+from game_ui import EnergyShop, Hud, Interface, Inventory, Match, SIZE
 from progression import Progression
 from minigame import Balance, BalancePolicy
 from spots import CastTarget
@@ -236,6 +236,23 @@ class AutoTest(unittest.TestCase):
                 auto._ready(self.cycle, hud, self.frame, 5., self.controls, self.region)
             self.controls.click.assert_called_with(self.region, *water)
             self.assertEqual(self.cycle.phase, Phase.CAST)
+
+    def test_farm_energy_purchase_requires_confirmed_offer_and_reserve(self) -> None:
+        bot = Auto(agent=True)
+        self.cycle.phase = Phase.REFILL
+        offer = EnergyShop(150, 35, 0, (.70, .27), (.76, .13))
+        bot._farm_refill(self.cycle, offer, False, 1., self.controls, self.region)
+        self.controls.click.assert_not_called()
+        bot._farm_refill(self.cycle, offer, False, 2., self.controls, self.region)
+        self.controls.click.assert_called_once_with(self.region, *offer.buy)
+        bot._farm_refill(self.cycle, offer, False, 4., self.controls, self.region)
+        self.controls.click.assert_called_with(self.region, *offer.close)
+        low = EnergyShop(134, 35, 0, offer.buy, offer.close)
+        self.controls.reset_mock()
+        self.cycle.refill_sent = False
+        bot._farm_refill(self.cycle, low, False, 6., self.controls, self.region)
+        bot._farm_refill(self.cycle, low, False, 7., self.controls, self.region)
+        self.controls.click.assert_called_once_with(self.region, *low.close)
 
     def test_autofish_recasts_after_long_wait_and_after_result(self) -> None:
         auto = Auto()

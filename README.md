@@ -80,6 +80,8 @@ Před startem postav postavu u vody, zobraz kruh dosahu a ověř energii, prut a
 
 Při nulové energii automat počká na přirozené dobití. **F8** spustí nebo pozastaví lov a **F9** ho ukončí. Při ztrátě fokusu nebo nečitelném stavu hry automat čeká a průběžně kontroluje obraz.
 
+Na rozpoznané placené Trout Farm agent upřednostňuje rybaření. Při nulové energii může jednou za návštěvu zkusit ověřenou nabídku 5 energie za 35 bankovek, pokud zelená část odpočtu ještě stačí, vybavení vystačí na pět hodů a po nákupu zůstane nejméně 100 bankovek. Vstup do placené části je potřeba zařídit ve hře.
+
 ### Agent
 
 ```powershell

@@ -16,7 +16,7 @@ from minigame import BalanceDetector, BalancePolicy
 from recorded import Recording
 from recorder import Recorder
 from replay import replay
-from spots import casting_hover, casting_spot, casting_target, shore_approach
+from spots import casting_hover, casting_spot, casting_target, shore_approach, timed_farm
 from vision import VisualDetector
 from window import Region
 
@@ -220,6 +220,23 @@ class RecordedWorkflow(unittest.TestCase):
         scene[200:] = (24, 160, 65)
         cv2.ellipse(scene, (305, 165), (15, 14), 0, 0, 360, (170, 50, 105), -1)
         self.assertIsNone(shore_approach(scene))
+
+    def test_paid_farm_water_requires_fenced_layout(self) -> None:
+        hsv = np.full((681, 1264, 3), (54, 211, 160), np.uint8)
+        hsv[:, :150, :] = hsv[:, 1104:, :] = 0
+        hsv[:340, 360:880] = (29, 150, 133)
+        hsv[117:139, 171:305] = (61, 170, 170)
+        hsv[143:155, 155:320] = (28, 71, 230)
+        scene = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+        cv2.ellipse(scene, (680, 340), (18, 15), 0, 0, 360, (170, 50, 105), -1)
+        cv2.circle(scene, (680, 370), 164, (245, 248, 250), 3, cv2.LINE_AA)
+        self.assertEqual(timed_farm(scene), (True, True))
+        target = casting_target(scene)
+        self.assertIsNotNone(target)
+        self.assertLess(target.point[1] * 681, 340)
+        scene[:, :150] = (24, 160, 65)
+        self.assertEqual(timed_farm(scene), (False, False))
+        self.assertIsNone(casting_target(scene))
 
     def test_write_inputs_and_frames(self) -> None:
         base = self.base
