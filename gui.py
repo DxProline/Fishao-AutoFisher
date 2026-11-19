@@ -299,10 +299,9 @@ class App:
                 handler.close()
             self.root.destroy()
         else:
-        self.root.after(33, self._poll)
+            self.root.after(33, self._poll)
 
     def close(self) -> None:
         self.closing = True
         self.hotkeys.close()
         self.stop()
-
