@@ -88,9 +88,9 @@ Na rozpoznané placené Trout Farm agent upřednostňuje rybaření. Při nulov�
 & $python .\main.py --agent
 ```
 
-Před spuštěním lovu zapni **Agent · postup, vybavení a mise**. Příkaz `--agent` tuto volbu předvybere. Po sérii málo úspěšných hodů umí zkusit přechod na Trout Farm. Rozpoznaná mise na čtyřhvězdičkovou rybu zkracuje dobu před porovnáním výsledků na stávajícím místě. Při chybějícím prutu nebo návnadě nejdřív projde inventář a teprve potom hledá ověřenou nabídku v obchodě. Porovnává ceny prutů a drží rezervu 30 bankovek. Při opakovaném úniku ryb prověří vlasec a po případném upgradu ponechá rezervu 5 mincí.
+Před spuštěním lovu zapni **Mise, postup a vybavení**. Příkaz `--agent` tuto volbu předvybere. Po sérii málo úspěšných hodů umí zkusit přechod na Trout Farm. Rozpoznaná mise na čtyřhvězdičkovou rybu zkracuje dobu před porovnáním výsledků na stávajícím místě. Při chybějícím prutu nebo návnadě nejdřív projde inventář a teprve potom hledá ověřenou nabídku v obchodě. Porovnává ceny prutů a drží rezervu 30 bankovek. Při opakovaném úniku ryb prověří vlasec a po případném upgradu ponechá rezervu 5 mincí.
 
-Volba **Automaticky se účastnit turnajů** je při otevření aplikace vypnutá. Zaškrtni ji před spuštěním lovu, pokud chceš turnaje vyhledávat a hlásit se za herní mince. Agent turnaje kontroluje nejvýše jednou za pět minut. Při neověřené registraci zavře panel a vrátí se k lovu. Pro změnu volby během lovu zastav agenta klávesou F9 a po změně ho znovu spusť.
+Volba **Účastnit se turnajů** je při otevření aplikace vypnutá. Zaškrtni ji před spuštěním lovu, pokud chceš turnaje vyhledávat a hlásit se za herní mince. Agent turnaje kontroluje nejvýše jednou za pět minut. Při neověřené registraci zavře panel a vrátí se k lovu. Pro změnu volby během lovu zastav agenta klávesou F9 a po změně ho znovu spusť.
 
 Při lovu se bod vybírá z vody uvnitř aktuálního kruhu prutu. Když hra hod nepotvrdí, automat zkusí další rozpoznaný bod. Při nejistém dosahu přejíždí kurzorem nad vodou a čeká na potvrzený kruh. AutoFish a agent drží průběžný náhled v paměti. Základní režim záznamníku je určený pro ruční ukládání snímků.
 
@@ -100,7 +100,7 @@ Agent pracuje s ověřenými obrazovkami hry. Další typy misí, samostatné ob
 
 ### Hra v překrytém okně
 
-Před spuštěním zaškrtni **Pracovat v překrytém okně hry**. Fishao nech otevřené a překryj jej prohlížečem nebo jiným oknem. Tento režim snímá klientskou plochu Fishao a předává kliknutí a šipky přímo hře. Skutečná myš zůstává volná. Při minimalizaci Fishao automat počká na obnovení okna. Režim závisí na tom, zda spuštěná hra přijímá zprávy o vstupu na pozadí. Pokud přímý vstup selže, můžeš po zastavení zvolit běžný režim.
+Před spuštěním zaškrtni **Lovit v překrytém okně**. Fishao nech otevřené a překryj jej prohlížečem nebo jiným oknem. Tento režim snímá klientskou plochu Fishao a předává kliknutí a šipky přímo hře. Skutečná myš zůstává volná. Při minimalizaci Fishao automat počká na obnovení okna. Režim závisí na tom, zda spuštěná hra přijímá zprávy o vstupu na pozadí. Pokud přímý vstup selže, můžeš po zastavení zvolit běžný režim.
 
 Pohyb postavy k vodě zajišťuje hráč. Hra a automat musí mít stejnou úroveň oprávnění Windows. Rozpoznávání bylo ověřené na skutečných snímcích úlovku, úniku a inventáře. Průchod AutoFish a rychlé změny směru byly testované simulací. Celý automatický průchod ve hře je třeba ověřit prvním hlídaným spuštěním. Probíhající hod může skončit i bez úlovku. AutoFish se řídí stavem hry a při nejasném obraze vyčkává.
 

@@ -18,11 +18,14 @@ from recorder import NS, Recorder, Status
 from version import VERSION
 from window import Image
 
-BG = "#101e28"
-PANEL = "#1a303c"
-INK = "#f1f7fa"
-MUTED = "#adc7d2"
-ACCENT = "#55dabc"
+BG = "#f2f4f6"
+PANEL = "#ffffff"
+INK = "#19232d"
+MUTED = "#53616f"
+LINE = "#d7dde3"
+ACCENT = "#235b70"
+PREVIEW_BG = "#1b232b"
+PREVIEW_INK = "#cad3dc"
 
 
 class GuiLog(logging.Handler):
@@ -50,8 +53,11 @@ class App:
         self.join_tournaments = tk.BooleanVar(master=root, value=False)
         self.background = tk.BooleanVar(master=root, value=False)
         self.autofish = autofish
-        self.action_name = ("XP Farm" if xp_farm else "AutoFish") if autofish else "asistenci" if assist else "záznam"
-        self.title = f"Fishao {self.action_name}" if autofish else "Fishao Asistence" if assist else "Fishao Záznamník"
+        self.action_name = "lov" if autofish else "asistenci" if assist else "záznam"
+        if autofish:
+            self.title = "Fishao Agent" if agent else "Fishao XP Farm" if xp_farm else "Fishao AutoFish"
+        else:
+            self.title = "Fishao Asistence" if assist else "Fishao Záznamník"
         self.closing = False
         self.actions: SimpleQueue[str] = SimpleQueue()
         self.messages: SimpleQueue[str] = SimpleQueue()
@@ -83,109 +89,137 @@ class App:
             self.log.addHandler(handler)
         return disk, view
 
-    def _build(self) -> None:
-        self.root.title(self.title)
-        self.root.geometry("1040x740")
-        self.root.minsize(690, 480)
-        self.root.configure(bg=BG)
-
+    def _configure_styles(self) -> None:
         style = ttk.Style(self.root)
         style.theme_use("clam")
         style.configure(".", background=BG, foreground=INK, font=("Segoe UI", 10))
-        style.configure("Hero.TLabel", font=("Segoe UI", 24, "bold"))
+        style.configure("Surface.TFrame", background=PANEL)
+        style.configure("Title.TLabel", font=("Segoe UI", 15, "bold"))
         style.configure("Muted.TLabel", foreground=MUTED)
-        style.configure("Status.TLabel", foreground=ACCENT, font=("Segoe UI", 11, "bold"))
-        style.configure("TButton", background=PANEL, padding=(12, 7), borderwidth=0)
-        style.map("TButton", background=[("active", "#295163")], foreground=[("disabled", "#88a2ab")])
-        style.configure("Start.TButton", background=ACCENT, foreground=BG)
-        style.map("Start.TButton", background=[("disabled", PANEL), ("active", "#8aebd5")])
-        style.configure("Options.TCheckbutton", background=BG, foreground=INK, focuscolor=MUTED,
-                        indicatorcolor=PANEL, bordercolor=MUTED, padding=(2, 3))
+        style.configure("Panel.TLabel", background=PANEL)
+        style.configure("PanelMuted.TLabel", background=PANEL, foreground=MUTED)
+        style.configure("Section.TLabel", background=PANEL, font=("Segoe UI", 10, "bold"))
+        style.configure("Metric.TLabel", background=PANEL, font=("Segoe UI", 11, "bold"))
+        style.configure("TSeparator", background=LINE)
+        style.configure("TButton", background=PANEL, padding=(12, 6), bordercolor=LINE,
+                        lightcolor=PANEL, darkcolor=PANEL, focuscolor=ACCENT)
+        style.map("TButton", background=[("disabled", BG), ("pressed", "#dce5eb"), ("active", "#e9eef2")],
+                  foreground=[("disabled", "#6d7984")])
+        style.configure("Start.TButton", background=ACCENT, foreground=PANEL, bordercolor=ACCENT,
+                        lightcolor=ACCENT, darkcolor=ACCENT, focuscolor=PANEL)
+        style.map("Start.TButton", background=[("disabled", BG), ("pressed", "#184455"), ("active", "#1c4e62")],
+                  foreground=[("disabled", "#6d7984")], bordercolor=[("disabled", LINE)])
+        style.configure("Options.TCheckbutton", background=PANEL, foreground=INK, focuscolor=ACCENT,
+                        indicatorbackground=PANEL, indicatorforeground=ACCENT, padding=(0, 4))
         style.map("Options.TCheckbutton",
-                  background=[("active", PANEL), ("focus", BG)],
-                  foreground=[("disabled", MUTED)],
-                  indicatorcolor=[("disabled", PANEL), ("selected", ACCENT)])
-        style.configure("TNotebook", background=BG, borderwidth=0)
-        style.configure("TNotebook.Tab", background=PANEL, foreground=MUTED, padding=(15, 7))
-        style.map("TNotebook.Tab", background=[("selected", "#284c5e")], foreground=[("selected", INK)])
-        style.configure("Card.TFrame", background=PANEL)
-        style.configure("Card.TLabel", background=PANEL, foreground=MUTED)
-        style.configure("Metric.TLabel", background=PANEL, foreground=INK, font=("Segoe UI", 15, "bold"))
+                  background=[("active", "#eef3f6")], foreground=[("disabled", "#6d7984")],
+                  indicatorbackground=[("disabled", BG), ("pressed", "#dce5eb")])
+        style.configure("TNotebook", background=BG, bordercolor=LINE, lightcolor=PANEL, darkcolor=PANEL,
+                        tabmargins=(0, 0, 0, 0))
+        style.configure("TNotebook.Tab", background=BG, foreground=MUTED, padding=(14, 7),
+                        bordercolor=LINE, focuscolor=ACCENT)
+        style.map("TNotebook.Tab", background=[("selected", PANEL), ("active", "#e7ecf0")],
+                  foreground=[("selected", INK)])
 
-        shell = ttk.Frame(self.root, padding=16)
+    def _build(self) -> None:
+        self.root.title(self.title)
+        self.root.geometry("1040x680")
+        self.root.minsize(780, 480)
+        self.root.configure(bg=BG)
+        self._configure_styles()
+
+        shell = ttk.Frame(self.root, padding=(16, 12))
         shell.pack(fill="both", expand=True)
-        ttk.Label(shell, text=f"Verze {VERSION}", style="Muted.TLabel").pack(anchor="w")
-        ttk.Label(shell, text=self.title, style="Hero.TLabel").pack(anchor="w")
-        ttk.Label(shell, textvariable=self.status, style="Status.TLabel", wraplength=620).pack(anchor="w", pady=(3, 9))
 
         bar = ttk.Frame(shell)
-        bar.pack(fill="x", pady=(0, 10))
-        self.toggle_button = ttk.Button(bar, command=self.toggle, style="Start.TButton")
-        self.toggle_button.pack(side="left", padx=(0, 8))
-        self.stop_button = ttk.Button(bar, text="Zastavit · F9", command=self.stop)
-        self.stop_button.pack(side="left", padx=(0, 8))
-        ttk.Button(bar, text="Otevřít složku", command=self.open_folder).pack(side="left")
-        mode = ("1 zkušební hod" if self.cast_once else "Ruční nahození") if self.assist else f"Cíl {self.fps} sn./s"
+        bar.pack(fill="x", pady=(0, 12))
+        ttk.Label(bar, text=self.title, style="Title.TLabel").pack(side="left")
+        ttk.Label(bar, text=VERSION, style="Muted.TLabel").pack(side="left", padx=(9, 0))
+        ttk.Button(bar, text="Otevřít složku", command=self.open_folder).pack(side="right")
+        self.stop_button = ttk.Button(bar, command=self.stop, width=13)
+        self.stop_button.pack(side="right", padx=(0, 6))
+        self.toggle_button = ttk.Button(bar, command=self.toggle, style="Start.TButton", width=20)
+        self.toggle_button.pack(side="right", padx=(0, 6))
+
+        workspace = ttk.Frame(shell)
+        workspace.pack(fill="both", expand=True)
+        workspace.columnconfigure(0, weight=1)
+        workspace.columnconfigure(1, minsize=240)
+        workspace.rowconfigure(0, weight=1)
+        tabs = ttk.Notebook(workspace)
+        tabs.grid(row=0, column=0, sticky="nsew")
+        tabs.enable_traversal()
+        preview_tab = ttk.Frame(tabs, style="Surface.TFrame")
+        log_tab = ttk.Frame(tabs, style="Surface.TFrame")
+        tabs.add(preview_tab, text="Náhled hry")
+        tabs.add(log_tab, text="Události")
+        self.canvas = tk.Canvas(preview_tab, bg=PREVIEW_BG, highlightthickness=0,
+                                borderwidth=0, width=1, height=1)
+        self.canvas.pack(fill="both", expand=True)
+        self.canvas_message = self.canvas.create_text(0, 0, fill=PREVIEW_INK, font=("Segoe UI", 10), justify="center")
+        self._update_preview_hint()
+        self.canvas_image = self.canvas.create_image(0, 0)
+        self.canvas.bind("<Configure>", self._resize_preview)
+        self.log_view = tk.Text(log_tab, bg=PANEL, fg=INK, relief="flat", wrap="word",
+                                font=("Consolas", 10), state="disabled", padx=12, pady=8,
+                                highlightthickness=0, width=1, height=1)
+        path = ttk.Label(log_tab, textvariable=self.folder, style="PanelMuted.TLabel", padding=(12, 6), width=1)
+        path.pack(side="bottom", fill="x")
+        ttk.Separator(log_tab).pack(side="bottom", fill="x")
+        scroll = ttk.Scrollbar(log_tab, command=self.log_view.yview)
+        self.log_view.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        self.log_view.pack(fill="both", expand=True)
+        self._build_sidebar(workspace)
+
+        ttk.Separator(shell).pack(fill="x", pady=(12, 0))
+        status = ttk.Label(shell, textvariable=self.status, padding=(0, 7, 0, 0))
+        status.pack(fill="x")
+        status.bind("<Configure>", lambda event: status.configure(wraplength=event.width))
+        self._buttons()
+
+    def _build_sidebar(self, workspace: ttk.Frame) -> None:
+        sidebar = ttk.Frame(workspace, style="Surface.TFrame", padding=(14, 12))
+        sidebar.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
         if self.autofish:
-            mode = "Do ručního vypnutí"
-        ttk.Label(bar, text=mode, style="Muted.TLabel").pack(side="right")
-        if self.autofish:
-            self.agent_option = ttk.Checkbutton(shell, text="Agent · postup, vybavení a mise",
+            ttk.Label(sidebar, text="Nastavení lovu", style="Section.TLabel").pack(anchor="w", pady=(0, 3))
+            self.agent_option = ttk.Checkbutton(sidebar, text="Mise, postup a vybavení",
                                                 variable=self.agent, style="Options.TCheckbutton",
                                                 command=self._buttons)
-            self.agent_option.pack(anchor="w")
+            self.agent_option.pack(fill="x")
             self.tournament_option = ttk.Checkbutton(
-                shell, text="Automaticky se účastnit turnajů", variable=self.join_tournaments,
+                sidebar, text="Účastnit se turnajů", variable=self.join_tournaments,
                 style="Options.TCheckbutton",
             )
-            self.tournament_option.pack(anchor="w", padx=(20, 0), pady=(0, 10))
-            self.background_option = ttk.Checkbutton(shell, text="Pracovat v překrytém okně hry",
+            self.tournament_option.pack(fill="x", padx=(14, 0))
+            self.background_option = ttk.Checkbutton(sidebar, text="Lovit v překrytém okně",
                                                      variable=self.background, style="Options.TCheckbutton",
                                                      command=self._update_preview_hint)
-            self.background_option.pack(anchor="w", pady=(0, 10))
+            self.background_option.pack(fill="x")
+            ttk.Separator(sidebar).pack(fill="x", pady=12)
 
-        cards = ttk.Frame(shell)
-        cards.pack(fill="x", pady=(0, 10))
+        ttk.Label(sidebar, text="Statistiky", style="Section.TLabel").pack(anchor="w", pady=(0, 5))
+        if not self.autofish:
+            mode = ("Jeden zkušební hod" if self.cast_once else "Ruční nahození") if self.assist else f"Cíl {self.fps} sn./s"
+            ttk.Label(sidebar, text=mode, style="PanelMuted.TLabel").pack(anchor="w", pady=(0, 8))
         self.metrics: dict[str, tk.StringVar] = {}
         labels = ("Minihry", "Vzorky", "Sledování sn./s", "Čas snímání") if self.assist else (
             "Uloženo", "Vynecháno", "Průměr sn./s", "Čas snímání", "Vstupy",
         )
         if self.autofish:
             labels = ("Hody", "Chyceno", "Uteklo", "Sledování sn./s", "Čas snímání")
-        for idx, label in enumerate(labels):
-            cards.columnconfigure(idx, weight=1, uniform="cards")
-            card = ttk.Frame(cards, style="Card.TFrame", padding=(10, 5))
-            card.grid(row=0, column=idx, sticky="nsew", padx=(0, 6 if idx < len(labels) - 1 else 0))
-            ttk.Label(card, text=label, style="Card.TLabel").pack(anchor="w")
-            self.metrics[label] = tk.StringVar(value="—")
-            ttk.Label(card, textvariable=self.metrics[label], style="Metric.TLabel").pack(anchor="w")
-
-        tabs = ttk.Notebook(shell)
-        tabs.pack(fill="both", expand=True)
-        preview_tab = ttk.Frame(tabs)
-        log_tab = ttk.Frame(tabs)
-        tabs.add(preview_tab, text="Ladicí náhled")
-        tabs.add(log_tab, text="Události")
-        self.canvas = tk.Canvas(preview_tab, bg="#0b151d", highlightthickness=0)
-        self.canvas.pack(fill="both", expand=True)
-        self.canvas_message = self.canvas.create_text(
-            0, 0, fill=MUTED, font=("Segoe UI", 11),
-        )
-        self._update_preview_hint()
-        self.canvas_image = self.canvas.create_image(0, 0)
-        self.canvas.bind("<Configure>", self._resize_preview)
-        self.log_view = tk.Text(log_tab, bg=PANEL, fg=INK, relief="flat", wrap="word",
-                                state="disabled", padx=10, pady=8)
-        scroll = ttk.Scrollbar(log_tab, command=self.log_view.yview)
-        self.log_view.configure(yscrollcommand=scroll.set)
-        scroll.pack(side="right", fill="y")
-        self.log_view.pack(fill="both", expand=True)
-        ttk.Label(shell, textvariable=self.folder, style="Muted.TLabel", wraplength=630).pack(anchor="w", pady=(8, 0))
-        self._buttons()
+        for label in labels:
+            row = ttk.Frame(sidebar, style="Surface.TFrame", padding=(0, 4))
+            row.pack(fill="x")
+            ttk.Label(row, text=label, style="PanelMuted.TLabel").pack(side="left")
+            self.metrics[label] = tk.StringVar(master=self.root, value="–")
+            ttk.Label(row, textvariable=self.metrics[label], style="Metric.TLabel",
+                      anchor="e", width=9).pack(side="right")
 
     def _resize_preview(self, event: tk.Event) -> None:
         for item in (self.canvas_message, self.canvas_image):
             self.canvas.coords(item, event.width // 2, event.height // 2)
+        self.canvas.itemconfigure(self.canvas_message, width=max(1, event.width - 40))
         self._render_preview()
 
     def _update_preview_hint(self) -> None:
@@ -198,7 +232,7 @@ class App:
         if image is None:
             return
         h, w = image.shape[:2]
-        scale = min(1.0, 920/w, 520/h, self.canvas.winfo_width() / w, self.canvas.winfo_height() / h)
+        scale = min(1.0, self.canvas.winfo_width() / w, self.canvas.winfo_height() / h)
         if scale < 1.0:
             image = cv2.resize(image, (max(1, round(w * scale)), max(1, round(h * scale))), interpolation=cv2.INTER_AREA)
         ok, encoded = cv2.imencode(".png", image, [cv2.IMWRITE_PNG_COMPRESSION, 1])
@@ -212,7 +246,7 @@ class App:
         recorder = self.recorder
         active = recorder is not None and not recorder.snapshot().finished
         stopping = active and recorder.stopping
-        label = f"Začít {self.action_name}"
+        label = f"Spustit {self.action_name}"
         if active:
             label = "Pokračovat" if recorder.paused else "Pozastavit"
         if self.shortcut_warning is None:
