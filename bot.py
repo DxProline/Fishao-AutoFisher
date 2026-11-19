@@ -9,7 +9,7 @@ from controls import Controls
 from game_ui import Hud, Interface, Inventory, Point
 from minigame import BalanceDetector, BalancePolicy, PixelBox
 from recorder import NS
-from spots import CastTarget, casting_target
+from spots import CastTarget, casting_hover, casting_target
 from window import FrameUnavailable, Image, Region, WindowCapture
 
 
@@ -38,6 +38,7 @@ class Cycle:
     position: Point | None = None
     candidate: CastTarget | None = None
     next_scan: float = 0.
+    next_hover: float = 0.
     score: dict[Point, int] = field(default_factory=dict)
     gear: str | None = None
     gear_step: str = ""
@@ -157,8 +158,9 @@ class Auto(Assist):
                 result_seen += 1
                 if cycle.phase is Phase.BALANCE and active - last_seen > .10:
                     cycle.advance(Phase.RESULT, active)
-                if result and result_seen >= 2 and cycle.phase in (Phase.WAIT,Phase.BALANCE,Phase.RESULT):
-                    cycle.finish_attempt(active,result)
+                if result and result_seen >= 2 and cycle.phase not in (Phase.CLOSE, Phase.GEAR):
+                    expected_result = cycle.phase in (Phase.WAIT, Phase.BALANCE, Phase.RESULT)
+                    cycle.finish_attempt(active, result if expected_result else None)
                     cycle.advance(Phase.CLOSE,active)
                     cycle.next_action = active
                     self._log.info("Výsledek: %s. Úlovky: %s.", result, cycle.caught)
@@ -175,8 +177,11 @@ class Auto(Assist):
                 if cycle.phase is Phase.GEAR:
                     self._gear(cycle, inventory, hud, active, controls, region)
                 elif cycle.phase is Phase.CLOSE:
-                    if result and active >= cycle.next_action:
-                        if controls.escape(region.hwnd):
+                    if result and result_seen >= 2 and active >= cycle.next_action:
+                        close = ui.result_close(image, result) if cycle.retries else None
+                        closed = (controls.click(region, *close) if close is not None
+                                  else controls.escape(region.hwnd))
+                        if closed:
                             cycle.retries += 1
                         cycle.next_action = active + .7
                     elif stable:
@@ -211,6 +216,8 @@ class Auto(Assist):
                 message = cycle.phase.value
                 if hud and cycle.phase in (Phase.READY, Phase.ENERGY, Phase.WAIT):
                     message += f" · energie {hud.energy if hud.energy is not None else '?'}"
+                if cycle.phase is Phase.READY and cycle.candidate is None and active < cycle.next_hover:
+                    message += " · čekám na kruh dosahu nad vodou"
                 if cycle.phase is Phase.GEAR and cycle.gear_step == "unavailable":
                     message = "Čekám na dostupný prut nebo návnadu."
             if active >= next_preview:
@@ -250,12 +257,19 @@ class Auto(Assist):
             preferred = cycle.candidate.point if cycle.candidate else cycle.preferred()
             target = casting_target(frame,preferred,avoid=cycle.position)
             cycle.next_scan = now if target is not None else now + .2
-            if (target is not None and target.agrees(cycle.candidate) and not self.stopping
-                    and not self.paused and controls.click(region,*target.point)):
-                cycle.position = target.point
-                cycle.original_energy = hud.energy
-                cycle.saw_waiting_hud = False
-                cycle.advance(Phase.CAST,now,progress=False)
+            if target is None and now >= cycle.next_hover and not self.stopping and not self.paused:
+                point = casting_hover(frame)
+                if point is not None:
+                    controls.hover(region, *point)
+                    cycle.next_hover = now + 1.5
+            if target is not None and not self.stopping and not self.paused:
+                if not controls.pointer_at(region, *target.point):
+                    controls.hover(region, *target.point)
+                elif target.agrees(cycle.candidate) and controls.click(region, *target.point):
+                    cycle.position = target.point
+                    cycle.original_energy = hud.energy
+                    cycle.saw_waiting_hud = False
+                    cycle.advance(Phase.CAST,now,progress=False)
             cycle.candidate = target
         return None
 

@@ -11,7 +11,7 @@ import cv2
 from controls import Controls
 from minigame import Balance, BalanceDetector, BalancePolicy, PixelBox
 from recorder import NS, Status, TITLE
-from spots import CastTarget, casting_target
+from spots import CastTarget, casting_hover, casting_target
 from window import FrameUnavailable, Image, WindowCapture
 
 WAIT_BITE_S = 120.0
@@ -99,6 +99,7 @@ class Assist(threading.Thread):
         throw_time: float | None = None
         last_spot: CastTarget | None = None
         next_spot = 0.0
+        next_hover = 0.0
         next_preview = 0.0
         was_active = False
         while not self.stopping:
@@ -174,10 +175,17 @@ class Assist(threading.Thread):
                 if active >= next_spot:
                     next_spot = active + 0.40
                     spot = casting_target(frame, last_spot.point if last_spot else None)
-                    if (spot is not None and spot.agrees(last_spot) and not self.stopping
-                            and not self.paused and controls.click(region, *spot.point)):
-                        throw_time = active
-                        self._log.info("Proveden jeden zkušební hod.")
+                    if spot is None and active >= next_hover and not self.stopping and not self.paused:
+                        point = casting_hover(frame)
+                        if point is not None:
+                            controls.hover(region, *point)
+                            next_hover = active + 1.5
+                    if spot is not None and not self.stopping and not self.paused:
+                        if not controls.pointer_at(region, *spot.point):
+                            controls.hover(region, *spot.point)
+                        elif spot.agrees(last_spot) and controls.click(region, *spot.point):
+                            throw_time = active
+                            self._log.info("Proveden jeden zkušební hod.")
                     last_spot = spot
             else:
                 status = "Čekám na lištu minihry. Nahoď ručně."

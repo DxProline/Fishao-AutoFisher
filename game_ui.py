@@ -47,7 +47,8 @@ class Inventory:
 class Interface:
     def __init__(self) -> None:
         self.templates = {key: self._image(ROOT / f"{key}.png") for key in
-                          ("energy", "rod", "bait", "inventory", "select", "select_hover", "caught", "escaped")}
+                          ("energy", "rod", "bait", "inventory", "select", "select_hover",
+                           "caught", "escaped", "fishdex_button", "result_x")}
         self.digits: dict[int, list[np.ndarray]] = {number: [] for number in range(10)}
         for file in ROOT.glob("digit_*.png"):
             digit = int(file.stem.split("_")[1])
@@ -111,7 +112,19 @@ class Interface:
             return "escaped"
         if self._find(image,"caught",(330,93,1000,165),.83):
             return "caught"
+        if (self._find(image, "fishdex_button", (455, 480, 800, 573), .84)
+                and self.result_close(image, "caught") is not None):
+            return "caught"
         return None
+
+    def result_close(self, image: Image, result: str) -> Point | None:
+        # Záložní klik smí mířit jen na rozpoznaný křížek konkrétního výsledku.
+        area = (850, 65, 1015, 164) if result == "caught" else (775, 195, 928, 301)
+        match = self._find(image, "result_x", area, .85)
+        if match is None:
+            return None
+        height, width = self.templates["result_x"].shape[:2]
+        return match.point(width // 2, height // 2)
 
     def hud(self, image: Image) -> Hud | None:
         energy = self._find(image,"energy",(450,0,640,74),.73)

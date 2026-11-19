@@ -67,6 +67,31 @@ class AutoTest(unittest.TestCase):
             self.auto._ready(self.cycle, hud, self.frame, 3., self.controls, self.region)
         self.controls.click.assert_called_once_with(self.region, *large.point)
 
+    def test_cast_waits_until_pointer_is_over_confirmed_water(self) -> None:
+        p = (.43, .35)
+        hud = Hud(2, 7, 12, True, (.9,.5), (.9,.7))
+        target = CastTarget(p, (.48, .48), .15, .54)
+        self.controls.pointer_at.side_effect = (False, False, True)
+        with patch("bot.casting_target", return_value=target):
+            self.auto._ready(self.cycle, hud, self.frame, 1., self.controls, self.region)
+            self.auto._ready(self.cycle, hud, self.frame, 1.1, self.controls, self.region)
+            self.controls.click.assert_not_called()
+            self.auto._ready(self.cycle, hud, self.frame, 1.2, self.controls, self.region)
+        self.assertEqual(self.controls.hover.call_count, 2)
+        self.controls.click.assert_called_once_with(self.region, *p)
+
+    def test_missing_circle_uses_hover_only_until_two_confirmations(self) -> None:
+        p = (.43, .35)
+        hud = Hud(2, 7, 12, True, (.9,.5), (.9,.7))
+        target = CastTarget(p, (.48, .48), .15, .54)
+        with patch("bot.casting_target", side_effect=(None, None, target, target)), patch("bot.casting_hover", return_value=p):
+            for stamp in (1., 1.5, 2.1):
+                self.auto._ready(self.cycle, hud, self.frame, stamp, self.controls, self.region)
+                self.controls.click.assert_not_called()
+            self.auto._ready(self.cycle, hud, self.frame, 2.2, self.controls, self.region)
+        self.controls.hover.assert_called_once_with(self.region, *p)
+        self.controls.click.assert_called_once_with(self.region, *p)
+
     def test_result_matching_at_different_sizes(self) -> None:
         ref = Interface()
         for label,(x,y) in {"caught":(646,116),"escaped":(506,263)}.items():
@@ -79,6 +104,20 @@ class AutoTest(unittest.TestCase):
             self.assertEqual(ref.result(ref.normalize(resized)),label)
         self.assertIsNone(ref.result(self.frame))
 
+    def test_catch_panel_without_readable_title_needs_close_anchor(self) -> None:
+        ui = Interface()
+        frame = self.frame.copy()
+        for key, x, y in (("fishdex_button",550,518), ("result_x",920,103)):
+            tile = ui.templates[key]
+            h,w = tile.shape[:2]
+            frame[y:y+h,x:x+w] = tile
+            if key == "fishdex_button":
+                self.assertIsNone(ui.result(frame))
+        self.assertEqual(ui.result(frame), "caught")
+        x,y = ui.result_close(frame, "caught")
+        self.assertAlmostEqual(x * SIZE[0], 933)
+        self.assertAlmostEqual(y * SIZE[1], 116)
+
     def test_progress_resets_retries(self) -> None:
         cycle = Cycle(retries=2)
         cycle.advance(Phase.CAST,1.,progress=False)
@@ -90,11 +129,12 @@ class AutoTest(unittest.TestCase):
         auto = Auto()
         ready, busy, balance, caught = range(4)
         sequence = iter([ready] * 3 + [busy] * 145 + [ready] * 3 + [busy] * 2
-                        + [balance, caught, balance] + [caught] * 6 + [ready] * 3)
+                        + [balance, caught, balance] + [caught] * 7 + [ready] * 3)
         states_seen: list[int] = []
         crop_used: list[bool] = []
         region = self.region
         position = (.5, .5)
+        close_button = (.74, .17)
 
         class Capture:
             def grab(self, *args, **kwargs):
@@ -107,6 +147,7 @@ class AutoTest(unittest.TestCase):
             def normalize(self, image): return image
             def inventory(self, image): return None
             def result(self, image): return "caught" if image[0, 0, 0] == caught else None
+            def result_close(self, image, result): return close_button
 
             def hud(self, image):
                 state = image[0, 0, 0]
@@ -122,7 +163,12 @@ class AutoTest(unittest.TestCase):
 
         input_frames = []
 
-        def click(*args):
+        close_frames = []
+
+        def click(region, x, y):
+            if (x, y) == close_button:
+                close_frames.append(len(states_seen))
+                return True
             input_frames.append(len(states_seen))
             if len(input_frames) == 3:
                 auto.stop()
@@ -138,7 +184,8 @@ class AutoTest(unittest.TestCase):
             patch.object(auto, "_annotate"),
         ):
             self.assertIn("vypnutý", auto._loop(Capture(), self.controls))
-        self.assertEqual(input_frames, [3, 151, 165])
+        self.assertEqual(input_frames, [3, 151, 166])
+        self.assertEqual(len(close_frames), 1)
         self.assertTrue(crop_used[154])
         self.assertTrue(crop_used[155])
         self.controls.escape.assert_called_once()

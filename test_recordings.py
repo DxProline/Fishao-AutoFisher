@@ -16,7 +16,7 @@ from minigame import BalanceDetector, BalancePolicy
 from recorded import Recording
 from recorder import Recorder
 from replay import replay
-from spots import casting_spot, casting_target
+from spots import casting_hover, casting_spot, casting_target
 from vision import VisualDetector
 from window import Region
 
@@ -161,6 +161,22 @@ class RecordedWorkflow(unittest.TestCase):
         point = casting_spot(scene, preferred=(305 / 680, 365 / 550))
         self.assertIsNotNone(point)
         self.assertLess(point[1] * 550, 245)
+
+    def test_shallow_water_requires_connection_to_deep_water(self) -> None:
+        scene = np.full((550, 680, 3), (31, 40, 237), np.uint8)
+        scene[:140] = (86, 83, 235)
+        scene[140:247] = (58, 32, 230)
+        scene[350:490, 230:360] = (58, 32, 230)  # izolovaná barevná plocha na souši
+        scene = cv2.cvtColor(scene, cv2.COLOR_HSV2BGR)
+        cv2.ellipse(scene, (305, 224), (15, 14), 0, 0, 360, (170, 50, 105), -1)
+        self.assertIsNone(casting_target(scene))
+        hover = casting_hover(scene)
+        self.assertIsNotNone(hover)
+        self.assertLess(hover[1] * 550, 247)
+        cv2.circle(scene, (305, 254), 152, (248, 250, 250), 3, cv2.LINE_AA)
+        target = casting_target(scene, preferred=(.44,.70))
+        self.assertIsNotNone(target)
+        self.assertLess(target.point[1] * 550, 247)
 
     def test_write_inputs_and_frames(self) -> None:
         base = self.base

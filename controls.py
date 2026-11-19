@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 from ctypes import wintypes
+from time import sleep
 
 import win32api
 import win32gui
@@ -68,23 +69,42 @@ class Controls:
             self._arrow(requested, up=False)
             self.held = requested
 
-    def click(self, region: Region, x: float, y: float) -> bool:
+    @staticmethod
+    def _pointer_move(region: Region, x: float, y: float) -> NativeInput | None:
         # Souřadnice jsou vzhledem k obsahu okna, v rozsahu 0 až 1.
         if not (0 <= x < 1 and 0 <= y < 1) or win32gui.GetForegroundWindow() != region.hwnd:
-            return False
+            return None
         client = (min(region.width - 1, int(x * region.width)), min(region.height - 1, int(y * region.height)))
         if win32gui.GetClientRect(region.hwnd)[2:] != (region.width, region.height):
-            return False
+            return None
         if win32gui.ClientToScreen(region.hwnd, (0, 0)) != (region.x, region.y):
-            return False
+            return None
         px, py = win32gui.ClientToScreen(region.hwnd, client)
         hovered = win32gui.WindowFromPoint((px, py))
         if not hovered or win32gui.GetAncestor(hovered, 2) != region.hwnd:
-            return False
+            return None
         sx, sy, sw, sh = (win32api.GetSystemMetrics(i) for i in range(76, 80))
         dx = round((px - sx) * 65535 / max(1, sw - 1))
         dy = round((py - sy) * 65535 / max(1, sh - 1))
-        move = NativeInput(0, InputValue(mouse=MouseInput(dx, dy, 0, 0xC001, 0, 0)))
+        return NativeInput(0, InputValue(mouse=MouseInput(dx, dy, 0, 0xC001, 0, 0)))
+
+    def hover(self, region: Region, x: float, y: float) -> bool:
+        move = self._pointer_move(region, x, y)
+        if move is None or win32gui.GetForegroundWindow() != region.hwnd:
+            return False
+        self._inputs(move)
+        return True
+
+    @staticmethod
+    def pointer_at(region: Region, x: float, y: float) -> bool:
+        px, py = win32api.GetCursorPos()
+        return (abs(px - (region.x + int(x * region.width))) <= 2
+                and abs(py - (region.y + int(y * region.height))) <= 2)
+
+    def click(self, region: Region, x: float, y: float) -> bool:
+        move = self._pointer_move(region, x, y)
+        if move is None:
+            return False
         down = NativeInput(0, InputValue(mouse=MouseInput(0, 0, 0, 0x0002, 0, 0)))
         up = NativeInput(0, InputValue(mouse=MouseInput(0, 0, 0, 0x0004, 0, 0)))
         if win32gui.GetForegroundWindow() != region.hwnd:
@@ -102,9 +122,9 @@ class Controls:
         down = NativeInput(1, InputValue(key=KeyInput(0, 0x01, 0x0008, 0, 0)))
         up = NativeInput(1, InputValue(key=KeyInput(0, 0x01, 0x000A, 0, 0)))
         try:
-            self._inputs(down, up)
-        except OSError:
+            self._inputs(down)
+            sleep(.075)
+        finally:
             self._inputs(up)
-            raise
         return True
 

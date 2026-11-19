@@ -33,13 +33,17 @@ def _open_water(hsv: Image) -> np.ndarray:
     # Noční filtr barví i písek do modra, ale moře má v záznamu vyšší sytost.
     sea = cv2.inRange(hsv, (76, 54, 75), (95, 255, 255))
     deep_sea = cv2.inRange(hsv, (96, 86, 75), (124, 255, 255))
+    shallow = cv2.inRange(hsv, (47, 16, 145), (95, 92, 255))
     kernel = np.ones((7, 7), np.uint8)
-    water = cv2.morphologyEx(cv2.bitwise_or(sea, deep_sea), cv2.MORPH_OPEN, kernel)
+    seeds = cv2.bitwise_or(sea, deep_sea)
+    water = cv2.morphologyEx(cv2.bitwise_or(seeds, shallow), cv2.MORPH_OPEN, kernel)
     # Světlý kruh může rozdělit vodní plochu. Spojení slouží jen k označení plochy.
     joined = cv2.morphologyEx(water, cv2.MORPH_CLOSE, kernel)
     count, labels, stats, _ = cv2.connectedComponentsWithStats(joined)
     minimum = water.size * .024
-    accepted = np.array([False] + [stats[i, cv2.CC_STAT_AREA] >= minimum for i in range(1, count)])
+    seeded = np.bincount(labels[seeds != 0], minlength=count)
+    accepted = (stats[:, cv2.CC_STAT_AREA] >= minimum) & (seeded >= water.size * .010)
+    accepted[0] = False
     return accepted[labels] & (water != 0)
 
 
@@ -47,7 +51,7 @@ def _circles(gray: np.ndarray, avatars: list[tuple[float, float, int, int]]) -> 
     """Změří poloměr z oblouku se středem u nohou postavy, včetně oříznutého kruhu."""
     height, width = gray.shape
     angles = np.linspace(0, 2 * np.pi, 96, endpoint=False, dtype=np.float32)
-    radii = np.arange(max(12, min(height, width) * .04), hypot(width, height), 2., dtype=np.float32)
+    radii = np.arange(max(12, min(height, width) * .04), hypot(width, height), dtype=np.float32)
     ray_x = radii[:, None] * np.cos(angles)
     ray_y = radii[:, None] * np.sin(angles)
     result = []
@@ -58,34 +62,32 @@ def _circles(gray: np.ndarray, avatars: list[tuple[float, float, int, int]]) -> 
                 mx, my = ray_x + cx, ray_y + cy
                 values = cv2.remap(gray, mx.astype(np.float32), my.astype(np.float32), cv2.INTER_LINEAR).astype(np.float32)
                 valid = (mx >= 1) & (mx < width - 2) & (my >= 1) & (my < height - 2)
-                valid = valid[:-6] & valid[6:]
-                contrast = values[3:-3] - np.maximum(values[:-6], values[6:])
-                hits = valid & (contrast >= 4)
+                valid = valid[:-14] & valid[14:]
+                contrast = values[7:-7] - np.maximum(values[:-14], values[14:])
+                hits = valid & (contrast >= 3)
                 sectors = (hits.reshape(-1, 8, 12).sum(axis=2) >= 4).sum(axis=1)
                 visible = valid.sum(axis=1)
                 support = hits.sum(axis=1) / np.maximum(1, visible)
                 strength = np.minimum(contrast, 14).clip(0) * hits
-                scores = np.where((sectors >= 3) & (visible >= 40) & (support >= .30),
+                # Malé světlé oblouky mezi nohama a rukama nejsou kruh prutu.
+                plausible_radius = radii[7:-7] >= 1.35 * hat_h
+                scores = np.where(plausible_radius & (sectors >= 3) & (visible >= 40) & (support >= .30),
                                   support + strength.sum(axis=1) / (np.maximum(1, visible) * 55), 0.)
                 i = int(scores.argmax())
                 if scores[i] > 0 and (best is None or scores[i] > best[0]):
-                    best = (float(scores[i]), cx, cy, float(radii[i+3]))
+                    best = (float(scores[i]), cx, cy, float(radii[i+7]))
         if best:
             result.append(best)
     return sorted(result, reverse=True)
 
 
-def casting_target(image: Image, preferred: Point | None = None, avoid: Point | None = None) -> CastTarget | None:
-    """Hledá přední sektor dosahu až po rozpoznání vlastního kruhu a břehu."""
+def _scene(image: Image) -> Image:
     h0, w0 = image.shape[:2]
     scale = min(1.0, 900 / max(h0, w0))
-    frame = cv2.resize(image, (round(w0 * scale), round(h0 * scale)), interpolation=cv2.INTER_AREA)
-    height, width = frame.shape[:2]
-    minimum = min(height, width)
-    if minimum < 96:
-        return None
-    raw_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    return cv2.resize(image, (round(w0 * scale), round(h0 * scale)), interpolation=cv2.INTER_AREA)
+
+
+def _avatars(hsv: Image) -> list[tuple[float, float, int, int]]:
     hat = cv2.inRange(hsv, (127, 115, 55), (166, 255, 255))
     count, _, stats, centers = cv2.connectedComponentsWithStats(hat)
     avatars = []
@@ -93,8 +95,44 @@ def casting_target(image: Image, preferred: Point | None = None, avoid: Point | 
         _, _, w, h, area = stats[i]
         if 50 <= area <= 2200 and 7 <= w <= 60 and 8 <= h <= 60 and .4 <= w / h <= 2.1:
             ax, ay = centers[i]
-            if 0 <= ay <= height * .90:
+            if 0 <= ay <= hsv.shape[0] * .90:
                 avatars.append((float(ax), float(ay), int(w), int(h)))
+    return avatars
+
+
+def casting_hover(image: Image) -> Point | None:
+    """Najde vodu u postavy pro najetí kurzorem, samostatně nepotvrzuje hod."""
+    frame = _scene(image)
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    height, width = hsv.shape[:2]
+    avatars = _avatars(hsv)
+    if not avatars:
+        return None
+    depth = cv2.distanceTransform(_open_water(hsv).astype(np.uint8), cv2.DIST_L2, 3)
+    yy, xx = np.ogrid[:height, :width]
+    candidates = []
+    for x, y, _, hat_h in avatars:
+        distance = (xx-x)**2 + (yy-y-hat_h)**2
+        valid = ((depth >= 9) & (distance >= (1.5*hat_h)**2) & (distance <= (7*hat_h)**2)
+                 & (xx >= .06*width) & (xx <= .90*width) & (yy >= .10*height) & (yy <= .86*height))
+        if valid.any():
+            sy, sx = np.unravel_index(np.where(valid, distance, np.inf).argmin(), depth.shape)
+            candidates.append((float(distance[sy,sx]) / hat_h**2, (int(sx) / width, int(sy) / height)))
+    candidates.sort()
+    if not candidates or len(candidates) > 1 and candidates[1][0] <= candidates[0][0] + 1.0:
+        return None
+    return candidates[0][1]
+
+
+def casting_target(image: Image, preferred: Point | None = None, avoid: Point | None = None) -> CastTarget | None:
+    """Hledá přední sektor dosahu až po rozpoznání vlastního kruhu a břehu."""
+    frame = _scene(image)
+    height, width = frame.shape[:2]
+    if min(height, width) < 96:
+        return None
+    raw_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    avatars = _avatars(hsv)
     if not avatars:
         return None
     circles = _circles(raw_gray, avatars)
