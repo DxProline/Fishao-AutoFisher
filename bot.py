@@ -114,6 +114,7 @@ class Auto(Assist):
         agreement: tuple[int|None,int|None,int|None] | None = None
         repetitions = ready_frames = 0
         last_seen = 0.
+        first_arrow = False
         observed_result: str | None = None
         result_seen = 0
         next_preview = active = 0.
@@ -176,6 +177,13 @@ class Auto(Assist):
                 cycle.confirm_cast()
                 if cycle.phase is not Phase.BALANCE:
                     self._log.info("Záběr rozpoznán. Řídím šipky podle ukazatele.")
+                    first_arrow = False
+                if not first_arrow and direction is not None and controls.held == direction:
+                    self._log.info("První šipka po záběru: %s (%s).",
+                                   "doleva" if direction == "left" else "doprava",
+                                   "zpráva do okna" if isinstance(controls, BackgroundControls)
+                                   and controls.uses_window_messages else "vstup Windows do aktivní hry")
+                    first_arrow = True
                 cycle.advance(Phase.BALANCE, active)
                 last_seen = active
                 expected = (region.width,region.height)
@@ -319,7 +327,7 @@ class Auto(Assist):
                 message = controls.problem
             self._update(text=message,casts=cycle.casts,caught=cycle.caught,escaped=cycle.escaped,
                          active_ns=round(active*NS), tracking_fps=tracking_fps)
-            interval = 1/TARGET_HZ if crop else .06
+            interval = 1/TARGET_HZ if crop else .025 if cycle.phase in (Phase.CAST, Phase.WAIT) else .06
             self._stop_requested.wait(max(0., interval-(perf_counter()-tick)))
         return "AutoFish vypnutý. Šipky uvolněné."
 

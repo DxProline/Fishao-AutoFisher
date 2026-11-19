@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import unittest
 from itertools import count
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import cv2
 import numpy as np
+import win32con
 
 from activities import Activities, Panel
 from bot import Auto, Cycle, Phase
+from controls import BackgroundControls
 from game_ui import EnergyShop, Hud, Interface, Inventory, Match, SIZE
 from progression import Progression
-from minigame import Balance, BalancePolicy
+from minigame import Balance, BalanceDetector, BalancePolicy
 from spots import CastTarget
 from window import Region
 
@@ -334,4 +336,54 @@ class AutoTest(unittest.TestCase):
         self.assertEqual(policy.choose(Balance(bar, .470, .5), 1.024), "right")
         self.assertIsNone(policy.choose(None, 1.033))
         self.assertIsNone(policy.choose(Balance(bar, .503, .5), 1.045))
+
+    def test_detects_bite_with_one_marker_on_first_frame(self) -> None:
+        for indicator, expected, lower in ((.08, "right", False), (.92, "left", True)):
+            with self.subTest(indicator=indicator):
+                frame = np.full((120, 380, 3), (180, 221, 237), np.uint8)
+                gradient = np.zeros((30, 284, 3), np.uint8)
+                gradient[:, :, 0] = np.interp(
+                    np.linspace(0, 1, 284), (0, .25, .5, .75, 1), (0, 45, 60, 45, 0))
+                gradient[:, :, 1:] = 255
+                frame[40:70, 40:324] = cv2.cvtColor(gradient, cv2.COLOR_HSV2BGR)
+                x = round(40 + 283 * indicator)
+                base, tip = (69, 60) if lower else (40, 49)
+                cv2.fillConvexPoly(frame, np.array([(x - 6, base), (x + 6, base), (x, tip)]),
+                                   (233, 110, 27))
+                reading = BalanceDetector().analyze(frame)
+                self.assertIsNotNone(reading)
+                self.assertAlmostEqual(reading.indicator, indicator, delta=.015)
+                self.assertEqual(BalancePolicy().choose(reading, 1.), expected)
+
+                # Samotná barevná lišta bez hrotu nesmí vyvolat žádnou šipku.
+                frame[40:70, 40:324] = cv2.cvtColor(gradient, cv2.COLOR_HSV2BGR)
+                self.assertIsNone(BalanceDetector().analyze(frame))
+
+    def test_arrow_changes_transport_when_game_focus_changes(self) -> None:
+        controls = BackgroundControls("FISHAO - Reborn")
+        hwnd = 10
+        with (
+            patch("controls.win32gui.GetForegroundWindow", return_value=hwnd) as focus,
+            patch("controls.win32gui.IsIconic", return_value=False),
+            patch.object(controls, "_game_window", return_value=True),
+            patch.object(controls, "_arrow") as native,
+            patch.object(controls, "_key", return_value=True) as message,
+        ):
+            controls.direction(hwnd, "left")
+            self.assertFalse(controls.uses_window_messages)
+            controls.direction(hwnd, "left")
+            native.assert_called_once_with("left", up=False)
+            message.assert_not_called()
+
+            focus.return_value = 20
+            controls.direction(hwnd, "left")
+            self.assertTrue(controls.uses_window_messages)
+            self.assertEqual(native.call_args_list, [call("left", up=False), call("left", up=True)])
+            self.assertEqual(controls.held, "left")
+            controls.direction(hwnd, None)
+            self.assertEqual(message.call_args_list, [
+                call(hwnd, win32con.VK_LEFT, 0x4B, up=False, extended=True),
+                call(hwnd, win32con.VK_LEFT, 0x4B, up=True, extended=True),
+            ])
+            self.assertIsNone(controls.held)
 

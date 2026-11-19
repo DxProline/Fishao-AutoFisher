@@ -49,8 +49,10 @@ class Assist(threading.Thread):
         if not self.stopping:
             if self.paused:
                 self._paused.clear()
+                self._log.info("Pokračuji po pauze.")
             else:
                 self._paused.set()
+                self._log.info("Ruční pauza. Šipky budou uvolněny.")
 
     def stop(self) -> None:
         self._stop_requested.set()

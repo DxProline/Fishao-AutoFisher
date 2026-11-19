@@ -135,12 +135,13 @@ class Controls:
 
 
 class BackgroundControls(Controls):
-    """Události doručuje výhradně do fronty okna hry."""
+    """Míří na okno hry, pro šipky v popředí používá vstup Windows."""
 
     def __init__(self, title: str) -> None:
+        super().__init__()
         self.title = title
-        self.held: str | None = None
         self._held_window = 0
+        self._native_arrow = False
         self._hovered: tuple[Region, int] | None = None
         self.problem: str | None = None
 
@@ -149,6 +150,10 @@ class BackgroundControls(Controls):
             return bool(hwnd and win32gui.IsWindow(hwnd) and win32gui.GetWindowText(hwnd) == self.title)
         except win32gui.error:
             return False
+
+    @property
+    def uses_window_messages(self) -> bool:
+        return not self._native_arrow
 
     def _post(self, hwnd: int, message: int, key: int, data: int) -> bool:
         if not self._game_window(hwnd):
@@ -202,6 +207,10 @@ class BackgroundControls(Controls):
 
     def release(self) -> None:
         if self.held is not None:
+            if self._native_arrow:
+                super().release()
+                self._native_arrow = False
+                return
             vk = win32con.VK_LEFT if self.held == "left" else win32con.VK_RIGHT
             if self._key(self._held_window, vk, self._SCANS[self.held], up=True, extended=True):
                 self.held = None
@@ -209,10 +218,20 @@ class BackgroundControls(Controls):
                 self.held = None
 
     def direction(self, hwnd: int, requested: str | None) -> None:
-        if requested == self.held and hwnd == self._held_window:
+        foreground = win32gui.GetForegroundWindow() == hwnd
+        if requested == self.held and hwnd == self._held_window and foreground == self._native_arrow:
             return
         self.release()
         if requested is None or self.held is not None or not self._game_window(hwnd) or win32gui.IsIconic(hwnd):
+            return
+        if foreground:
+            # Zpráva WM_KEYDOWN sama nemění stav fyzicky držené klávesy ve Windows.
+            # Před odesláním znovu ověř fokus přes běžnou cestu vstupu.
+            super().direction(hwnd, requested)
+            if self.held is not None:
+                self._native_arrow = True
+                self._held_window = hwnd
+                self.problem = None
             return
         vk = win32con.VK_LEFT if requested == "left" else win32con.VK_RIGHT
         if self._key(hwnd, vk, self._SCANS[requested], up=False, extended=True):

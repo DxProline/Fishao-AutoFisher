@@ -113,7 +113,7 @@ class RecordedWorkflow(unittest.TestCase):
         resized = cv2.resize(dialog(.30), (1332, 1044))
         self.assertEqual(policy.choose(detector.analyze(resized)), "right")
         self.assertIsNone(policy.choose(detector.analyze(self.base)))
-        self.assertIsNone(detector.analyze(dialog(.64, partial=True)))
+        self.assertEqual(policy.choose(detector.analyze(dialog(.64, partial=True))), "left")
         self.assertIsNotNone(detector.analyze(dialog(.64)))
         partial = detector.analyze_crop(dialog(.70, partial=True), 0, 0)
         self.assertIsNotNone(partial)
