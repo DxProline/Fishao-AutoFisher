@@ -1,0 +1,86 @@
+{
+  "window_title": "FISHAO - Reborn",
+  "window_size": [
+    2560,
+    1369
+  ],
+  "keys": {
+    "cast": "space",
+    "hook": "",
+    "left": "left",
+    "right": "right",
+    "result": ""
+  },
+  "thresholds": {
+    "state": 0.88,
+    "marker": 0.84,
+    "resource": 0.94,
+    "ambiguity": 0.04
+  },
+  "timing": {
+    "capture_s": [
+      0.06,
+      0.1
+    ],
+    "reaction_s": [
+      0.08,
+      0.18
+    ],
+    "hold_s": [
+      0.035,
+      0.075
+    ],
+    "minigame_gap_s": [
+      0.09,
+      0.16
+    ],
+    "startup_s": 5,
+    "calibration_wait_s": 45,
+    "unknown_s": 2,
+    "stuck_s": 45,
+    "result_s": 10,
+    "bite_timeout_s": 120,
+    "game_timeout_s": 180,
+    "max_runtime_s": 1800
+  },
+  "limits": {
+    "max_fish": 100,
+    "max_retries": 3
+  },
+  "stable_frames": 2,
+  "dead_zone_ratio": 0.035,
+  "resources": {
+    "energy": false,
+    "bait": false
+  },
+  "debug": false,
+  "templates": {
+    "ready": {
+      "box": [
+        1270,
+        634,
+        108,
+        124
+      ],
+      "path": "templates/ready_24da69fbd4.png"
+    },
+    "waiting": {
+      "box": [
+        1374,
+        196,
+        92,
+        195
+      ],
+      "path": "templates/waiting_8e536f3b99.png"
+    },
+    "minigame": {
+      "box": [
+        1380,
+        200,
+        103,
+        195
+      ],
+      "path": "templates/minigame_44036f8749.png"
+    }
+  }
+}

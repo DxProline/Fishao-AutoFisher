@@ -1,0 +1,40 @@
+2026-11-18 22:25:57,580 INFO Šablona uložena: Připraveno k nahození ((1270, 634, 108, 124)).
+2026-11-18 22:27:39,075 INFO Šablona uložena: Čekání na záběr ((1374, 196, 92, 195)).
+2026-11-18 22:27:57,144 INFO Šablona uložena: Minihra ((1380, 200, 103, 195)).
+2026-11-18 22:28:21,228 WARNING Doplň kalibraci: Oblast minihry, Cíl minihry, Ukazatel minihry, Ryba chycena, Ryba utekla
+2026-11-18 23:14:29,336 ERROR Běh skončil výjimkou.
+Traceback (most recent call last):
+  File "C:\Users\jenda\PycharmProjects\PythonProject6\bot.py", line 178, in run
+    final = self._run()
+  File "C:\Users\jenda\PycharmProjects\PythonProject6\bot.py", line 188, in _run
+    arena = tuple(self.cfg["templates"]["arena"]["box"])
+                  ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+KeyError: 'arena'
+2026-11-18 23:14:29,339 ERROR Chyba: 'arena'
+2026-11-18 23:14:29,340 INFO Chyba: 'arena'
+2026-11-18 23:17:58,054 ERROR Obrazovka nebo prvky minihry nejsou rozpoznatelné.
+2026-11-18 23:17:58,055 INFO Obrazovka nebo prvky minihry nejsou rozpoznatelné.
+2026-11-18 23:18:09,458 ERROR Obrazovka nebo prvky minihry nejsou rozpoznatelné.
+2026-11-18 23:18:09,458 INFO Obrazovka nebo prvky minihry nejsou rozpoznatelné.
+2026-11-18 23:18:25,186 ERROR Obrazovka nebo prvky minihry nejsou rozpoznatelné.
+2026-11-18 23:18:25,187 INFO Obrazovka nebo prvky minihry nejsou rozpoznatelné.
+2026-11-18 23:19:47,064 INFO HOZENÍ
+2026-11-18 23:19:54,566 INFO Okno hry zmizelo, je minimalizované nebo ztratilo fokus. Pokračuj klávesou F8.
+2026-11-18 23:20:18,395 INFO Zastaveno. Chyceno 0, uteklo 0.
+2026-11-18 23:21:48,357 INFO HOZENÍ
+2026-11-18 23:21:51,228 INFO ČEKÁNÍ NA ZÁBĚR
+2026-11-18 23:22:43,672 INFO Okno hry zmizelo, je minimalizované nebo ztratilo fokus. Pokračuj klávesou F8.
+2026-11-18 23:24:41,922 INFO Okno hry zmizelo, je minimalizované nebo ztratilo fokus. Pokračuj klávesou F8.
+2026-11-18 23:25:22,692 INFO Zastaveno. Chyceno 0, uteklo 0.
+2026-11-18 23:27:26,157 INFO HOZENÍ
+2026-11-18 23:27:29,541 INFO ČEKÁNÍ NA ZÁBĚR
+2026-11-18 23:27:34,146 INFO Zavřen dialog výsledku pomocí jeho tlačítka zavření.
+2026-11-18 23:27:34,146 INFO HOZENÍ
+2026-11-18 23:27:37,166 INFO ČEKÁNÍ NA ZÁBĚR
+2026-11-18 23:27:37,332 INFO Zavřen dialog výsledku pomocí jeho tlačítka zavření.
+2026-11-18 23:27:37,333 INFO HOZENÍ
+2026-11-18 23:27:40,270 INFO ČEKÁNÍ NA ZÁBĚR
+2026-11-18 23:27:57,677 INFO Zavřen dialog výsledku pomocí jeho tlačítka zavření.
+2026-11-18 23:27:57,677 INFO HOZENÍ
+2026-11-18 23:28:00,871 INFO Okno hry zmizelo, je minimalizované nebo ztratilo fokus. Pokračuj klávesou F8.
+2026-11-18 23:29:00,089 INFO Zastaveno. Chyceno 0, uteklo 0.
