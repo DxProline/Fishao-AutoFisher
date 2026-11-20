@@ -15,6 +15,7 @@ from assist import Assist
 from bot import Auto
 from hotkeys import Hotkeys
 from recorder import NS, Recorder, Status
+from version import VERSION
 from window import Image
 
 BG = "#f2f4f6"
@@ -81,7 +82,7 @@ class App:
         return disk, view
 
     def _build(self) -> None:
-        self.root.title(self.title)
+        self.root.title(f"{self.title} {VERSION}")
         self.root.geometry("1040x680")
         self.root.minsize(760, 480)
         self.root.configure(bg=BG)
@@ -108,7 +109,10 @@ class App:
         shell.pack(fill="both", expand=True)
         bar = ttk.Frame(shell)
         bar.pack(fill="x", pady=(0, 10))
-        ttk.Label(bar, text=self.title, style="Hero.TLabel").pack(side="left", padx=(0, 14))
+        heading = ttk.Frame(bar)
+        heading.pack(side="left", padx=(0, 14))
+        ttk.Label(heading, text=self.title, style="Hero.TLabel").pack(anchor="w")
+        ttk.Label(heading, text=f"Verze {VERSION}", style="Muted.TLabel").pack(anchor="w")
         self.toggle_button = ttk.Button(bar, command=self.toggle, style="Start.TButton")
         self.toggle_button.pack(side="left", padx=(0, 8))
         self.stop_button = ttk.Button(bar, text="Zastavit · F9", command=self.stop)
