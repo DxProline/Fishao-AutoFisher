@@ -1,5 +1,7 @@
 # Fishao AutoFisher
 
+Tato obnova vychází z commitu `a94c4fd` a obsahuje zachované opravy nahození z verze 1.1.8. Původní commit 1.1.8 obsahoval také novější vzhled a funkce agenta.
+
 Windows 11, 64bitový CPython 3.14. Balíček obsahuje záznamník, offline přehrávač, asistenci a automat opakovaného lovu z připraveného místa u vody.
 
 ## 1. Záznamník
@@ -59,7 +61,7 @@ Volitelný režim jednoho zkušebního hodu:
 & $python .\main.py --assist --test-cast
 ```
 
-Před startem postav postavu u vody, zobraz kruh dosahu a ověř energii, prut a návnadu. Aplikace zkusí jeden klik, pokud na dvou snímcích najde podobný bod ve vodě uvnitř kruhu. Pro hledání bodu, čekání na záběr a minihru má oddělené limity. Po jednom pokusu se relace ukončí.
+Před startem postav postavu u vody, zobraz kruh dosahu a ověř energii, prut a návnadu. Aplikace zkusí jeden hod dvěma rychlými kliky, pokud na dvou snímcích najde podobný bod ve vodě uvnitř kruhu. Pro hledání bodu, čekání na záběr a minihru má oddělené limity. Po jednom pokusu se relace ukončí.
 
 ## 4. AutoFish
 

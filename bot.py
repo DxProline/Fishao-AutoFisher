@@ -270,7 +270,8 @@ class Auto(Assist):
             if target is not None and not self.stopping and not self.paused:
                 if not controls.pointer_at(region, *target.point):
                     controls.hover(region, *target.point)
-                elif target.agrees(cycle.candidate) and controls.click(region, *target.point):
+                elif target.agrees(cycle.candidate) and controls.cast(
+                        region, *target.point, cancelled=lambda: self.stopping or self.paused):
                     cycle.position = target.point
                     cycle.original_energy = hud.energy
                     cycle.saw_waiting_hud = False

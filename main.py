@@ -18,7 +18,7 @@ def main() -> None:
                         help="Spustí AutoFish, který loví do ručního vypnutí.")
     parser.add_argument("--max-casts", type=int, choices=range(1,501), metavar="1-500",
                         help="Volitelný limit pro krátký test AutoFish.")
-    parser.add_argument("--test-cast", action="store_true", help="S asistencí umožní jeden zkušební klik do vody.")
+    parser.add_argument("--test-cast", action="store_true", help="S asistencí umožní jeden zkušební hod.")
     args = parser.parse_args()
     if args.test_cast and not args.assist:
         parser.error("--test-cast vyžaduje --assist")

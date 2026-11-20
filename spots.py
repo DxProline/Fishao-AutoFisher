@@ -52,30 +52,48 @@ def _circles(gray: np.ndarray, avatars: list[tuple[float, float, int, int]]) -> 
     height, width = gray.shape
     angles = np.linspace(0, 2 * np.pi, 96, endpoint=False, dtype=np.float32)
     radii = np.arange(max(12, min(height, width) * .04), hypot(width, height), dtype=np.float32)
-    ray_x = radii[:, None] * np.cos(angles)
-    ray_y = radii[:, None] * np.sin(angles)
+    cosines, sines = np.cos(angles), np.sin(angles)
+    ray_x = radii[:, None] * cosines
+    ray_y = radii[:, None] * sines
+    opposing_sides = tuple((axis >= .65, axis <= -.65) for axis in (cosines, sines))
+    large_start = max(0, int(np.searchsorted(radii, height * .5)) - 7)
     result = []
     for ax, ay, hat_w, hat_h in avatars:
         best = None
-        for cx in (ax - .14 * hat_w, ax, ax + .14 * hat_w):
-            for cy in (ay + step * hat_h for step in (.6, .8, 1., 1.2, 1.4, 1.6)):
-                mx, my = ray_x + cx, ray_y + cy
-                values = cv2.remap(gray, mx.astype(np.float32), my.astype(np.float32), cv2.INTER_LINEAR).astype(np.float32)
-                valid = (mx >= 1) & (mx < width - 2) & (my >= 1) & (my < height - 2)
-                valid = valid[:-14] & valid[14:]
-                contrast = values[7:-7] - np.maximum(values[:-14], values[14:])
-                hits = valid & (contrast >= 3)
-                sectors = (hits.reshape(-1, 8, 12).sum(axis=2) >= 4).sum(axis=1)
-                visible = valid.sum(axis=1)
-                support = hits.sum(axis=1) / np.maximum(1, visible)
-                strength = np.minimum(contrast, 14).clip(0) * hits
-                # Malé světlé oblouky mezi nohama a rukama nejsou kruh prutu.
-                plausible_radius = radii[7:-7] >= 1.35 * hat_h
-                scores = np.where(plausible_radius & (sectors >= 3) & (visible >= 40) & (support >= .30),
-                                  support + strength.sum(axis=1) / (np.maximum(1, visible) * 55), 0.)
-                i = int(scores.argmax())
-                if scores[i] > 0 and (best is None or scores[i] > best[0]):
-                    best = (float(scores[i]), cx, cy, float(radii[i+7]))
+        centers = [(ax + dx * hat_w, ay + dy * hat_h, 0)
+                   for dx in (-.14, 0., .14) for dy in (.6, .8, 1., 1.2, 1.4, 1.6)]
+        # U otočené postavy může být vidět jen část čepice.
+        centers.extend((ax + dx * hat_w, ay + dy * hat_h, large_start)
+                       for dx in (-.40, 0., .40) for dy in (1.8, 2.2, 2.6, 3.0))
+        for cx, cy, start in centers:
+            tested_radii = radii[start + 7:-7]
+            mx, my = ray_x[start:] + cx, ray_y[start:] + cy
+            values = cv2.remap(gray, mx, my, cv2.INTER_LINEAR).astype(np.float32)
+            valid = (mx >= 1) & (mx < width - 2) & (my >= 1) & (my < height - 2)
+            valid = valid[:-14] & valid[14:]
+            contrast = values[7:-7] - np.maximum(values[:-14], values[14:])
+            hits = valid & (contrast >= 3)
+            sectors = (hits.reshape(-1, 8, 12).sum(axis=2) >= 4).sum(axis=1)
+            visible = valid.sum(axis=1)
+            support = hits.sum(axis=1) / np.maximum(1, visible)
+            strength = np.minimum(contrast, 14).clip(0) * hits
+            enough_sectors = (sectors >= 3) & (visible >= 40) & (support >= .30)
+            enough_arcs = np.zeros_like(enough_sectors)
+            # U kruhu přesahujícího obě hrany ověř dva protilehlé oblouky.
+            for sides, span in zip(opposing_sides, (max(cy, height - cy), max(cx, width - cx))):
+                clipped = np.flatnonzero((tested_radii > span) & (visible >= 24)
+                                         & (support >= .38) & ~enough_sectors)
+                if clipped.size:
+                    for side in sides:
+                        samples = np.ix_(clipped, side)
+                        side_hits = hits[samples].sum(axis=1)
+                        clipped = clipped[(side_hits >= 7) & (side_hits >= .38 * valid[samples].sum(axis=1))]
+                    enough_arcs[clipped] = True
+            scores = np.where((tested_radii >= 1.35 * hat_h) & (enough_sectors | enough_arcs),
+                              support + strength.sum(axis=1) / (np.maximum(1, visible) * 55), 0.)
+            i = int(scores.argmax())
+            if scores[i] > 0 and (best is None or scores[i] > best[0]):
+                best = (float(scores[i]), cx, cy, float(tested_radii[i]))
         if best:
             result.append(best)
     return sorted(result, reverse=True)

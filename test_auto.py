@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import unittest
 from itertools import count
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, call, patch
 
 import cv2
 import numpy as np
 
 from bot import Auto, Cycle, Phase
+from controls import Controls
 from game_ui import Hud, Interface, Inventory, SIZE
 from minigame import Balance, BalancePolicy
 from spots import CastTarget
@@ -22,19 +23,52 @@ class AutoTest(unittest.TestCase):
         self.controls = Mock()
         self.frame = np.zeros((SIZE[1],SIZE[0],3), np.uint8)
 
+    def test_cast_clicks_twice_and_respects_cancellation(self) -> None:
+        controls = object.__new__(Controls)
+        with (patch("controls.sleep") as delay,
+              patch.object(controls, "click", return_value=True) as click,
+              patch.object(controls, "pointer_at", return_value=True)):
+            self.assertTrue(controls.cast(self.region, .43, .35, cancelled=lambda: False))
+            self.assertEqual(click.call_args_list, [call(self.region, .43, .35)] * 2)
+            delay.assert_called_once_with(.035)
+            click.reset_mock()
+            cancelled = Mock(side_effect=(False, True))
+            self.assertTrue(controls.cast(self.region, .43, .35, cancelled=cancelled))
+            click.assert_called_once_with(self.region, .43, .35)
+
+    def test_equipment_count_separates_touching_digits(self) -> None:
+        levels = {".": 90, "+": 228, "#": 245}
+        gray = np.array([[levels[pixel] for pixel in row] for row in (
+            "................",
+            ".....#+...####..",
+            "....###..####...",
+            "....#.#..##.....",
+            "...#.+#..####...",
+            "..+#.+#..#..##..",
+            "..#+.##.....##..",
+            "..######....##..",
+            ".....+#.+#+##+..",
+            "......#..####...",
+            "................",
+        )], dtype=np.uint8)
+        ui = Interface()
+        patch_image = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        self.assertIsNone(ui.number(patch_image, white=True))
+        self.assertEqual(ui._gear_count(patch_image), 45)
+
     def test_waits_for_energy_and_requires_two_cast_points(self) -> None:
         available = (0.9,.5)
         empty = Hud(0,7,12,True,available,available)
         self.auto._ready(self.cycle,empty,self.frame,0.,self.controls,self.region)
         self.assertEqual(self.cycle.phase,Phase.ENERGY)
-        self.controls.click.assert_not_called()
+        self.controls.cast.assert_not_called()
         good = Hud(1,7,12,True,available,available)
         with patch("bot.casting_target",return_value=CastTarget((.4,.2),(.4,.3),.15,.54)):
             self.auto._ready(self.cycle,good,self.frame,2.,self.controls,self.region)
-            self.controls.click.assert_not_called()
+            self.controls.cast.assert_not_called()
             self.auto._ready(self.cycle,good,self.frame,3.,self.controls,self.region)
         self.assertEqual(self.cycle.phase,Phase.CAST)
-        self.controls.click.assert_called_once_with(self.region,.4,.2)
+        self.controls.cast.assert_called_once_with(self.region, .4, .2, cancelled=ANY)
 
     def test_changes_equipment_only_after_inventory_and_verifies_hud(self) -> None:
         rod,bait = (.91,.5),(.91,.7)
@@ -63,9 +97,9 @@ class AutoTest(unittest.TestCase):
         with patch("bot.casting_target", side_effect=(small, large, large)):
             self.auto._ready(self.cycle, hud, self.frame, 1., self.controls, self.region)
             self.auto._ready(self.cycle, hud, self.frame, 2., self.controls, self.region)
-            self.controls.click.assert_not_called()
+            self.controls.cast.assert_not_called()
             self.auto._ready(self.cycle, hud, self.frame, 3., self.controls, self.region)
-        self.controls.click.assert_called_once_with(self.region, *large.point)
+        self.controls.cast.assert_called_once_with(self.region, *large.point, cancelled=ANY)
 
     def test_cast_waits_until_pointer_is_over_confirmed_water(self) -> None:
         p = (.43, .35)
@@ -75,10 +109,10 @@ class AutoTest(unittest.TestCase):
         with patch("bot.casting_target", return_value=target):
             self.auto._ready(self.cycle, hud, self.frame, 1., self.controls, self.region)
             self.auto._ready(self.cycle, hud, self.frame, 1.1, self.controls, self.region)
-            self.controls.click.assert_not_called()
+            self.controls.cast.assert_not_called()
             self.auto._ready(self.cycle, hud, self.frame, 1.2, self.controls, self.region)
         self.assertEqual(self.controls.hover.call_count, 2)
-        self.controls.click.assert_called_once_with(self.region, *p)
+        self.controls.cast.assert_called_once_with(self.region, *p, cancelled=ANY)
 
     def test_missing_circle_uses_hover_only_until_two_confirmations(self) -> None:
         p = (.43, .35)
@@ -87,10 +121,10 @@ class AutoTest(unittest.TestCase):
         with patch("bot.casting_target", side_effect=(None, None, target, target)), patch("bot.casting_hover", return_value=p):
             for stamp in (1., 1.5, 2.1):
                 self.auto._ready(self.cycle, hud, self.frame, stamp, self.controls, self.region)
-                self.controls.click.assert_not_called()
+                self.controls.cast.assert_not_called()
             self.auto._ready(self.cycle, hud, self.frame, 2.2, self.controls, self.region)
         self.controls.hover.assert_called_once_with(self.region, *p)
-        self.controls.click.assert_called_once_with(self.region, *p)
+        self.controls.cast.assert_called_once_with(self.region, *p, cancelled=ANY)
 
     def test_result_matching_at_different_sizes(self) -> None:
         ref = Interface()
@@ -182,15 +216,18 @@ class AutoTest(unittest.TestCase):
 
         close_frames = []
 
-        def click(region, x, y):
-            if (x, y) == close_button:
-                close_frames.append(len(states_seen))
-                return True
+        def cast(region, x, y, *, cancelled):
             input_frames.append(len(states_seen))
             if len(input_frames) == 3:
                 auto.stop()
             return True
 
+        def click(region, x, y):
+            self.assertEqual((x, y), close_button)
+            close_frames.append(len(states_seen))
+            return True
+
+        self.controls.cast.side_effect = cast
         self.controls.click.side_effect = click
         self.controls.escape.return_value = True
         with (
