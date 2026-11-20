@@ -87,7 +87,7 @@ class RecordedWorkflow(unittest.TestCase):
         self.assertEqual(detector.analyze(255 - resized, 10 * STEP)["visual_state"], "scene_change")
 
     def test_balance_holds_opposite_direction_and_releases(self) -> None:
-        def dialog(position: float) -> np.ndarray:
+        def dialog(position: float, *, single: bool = False) -> np.ndarray:
             image = np.full((580, 740, 3), (155, 218, 186), np.uint8)
             x, y, width, height = 280, 403, 284, 31
             color = np.zeros((height, width, 3), np.uint8)
@@ -96,7 +96,10 @@ class RecordedWorkflow(unittest.TestCase):
             color[:, :, 1:] = 251
             image[y : y + height, x : x + width] = cv2.cvtColor(color, cv2.COLOR_HSV2BGR)
             center = x + round(position * width)
-            for edge, inset in ((y, y + 9), (y + height - 1, y + height - 10)):
+            edges = [(y, y + 9)]
+            if not single:
+                edges.append((y + height - 1, y + height - 10))
+            for edge, inset in edges:
                 points = np.array([(center - 5, edge), (center + 5, edge), (center, inset)], np.int32)
                 cv2.fillConvexPoly(image, points, (210, 98, 12))
             return image
@@ -111,6 +114,7 @@ class RecordedWorkflow(unittest.TestCase):
             self.assertEqual(policy.choose(result), direction)
         resized = cv2.resize(dialog(.30), (1332, 1044))
         self.assertEqual(policy.choose(detector.analyze(resized)), "right")
+        self.assertEqual(BalancePolicy().choose(BalanceDetector().analyze(dialog(.76, single=True))), "left")
         self.assertIsNone(policy.choose(detector.analyze(self.base)))
 
     def test_test_cast_requires_circle_and_water(self) -> None:

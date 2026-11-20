@@ -8,7 +8,7 @@ from time import perf_counter
 
 import cv2
 
-from controls import Controls
+from controls import BackgroundControls, Controls
 from minigame import Balance, BalanceDetector, BalancePolicy, PixelBox
 from recorder import NS, Status, TITLE
 from spots import CastTarget, casting_hover, casting_target
@@ -24,9 +24,10 @@ TRACK_MISSES = 4
 class Assist(threading.Thread):
     """Jedna potvrzená minihra, volitelně s jedním zkušebním nahozením."""
 
-    def __init__(self, cast_once: bool = False) -> None:
+    def __init__(self, cast_once: bool = False, *, background: bool = False) -> None:
         super().__init__(name="FishaoAssist", daemon=True)
         self.cast_once = cast_once
+        self.background = background
         self._state = Status(text="Čekám na aktivní hru.")
         self._stop_requested = threading.Event()
         self._paused = threading.Event()
@@ -71,9 +72,9 @@ class Assist(threading.Thread):
         final = "Asistence ukončena."
         error = False
         try:
-            controls = Controls()
+            controls = BackgroundControls(TITLE) if self.background else Controls()
             try:
-                with WindowCapture(TITLE) as capture:
+                with WindowCapture(TITLE, background=self.background) as capture:
                     final = self._loop(capture, controls)
             finally:
                 controls.release()

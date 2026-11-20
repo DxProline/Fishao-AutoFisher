@@ -1,6 +1,14 @@
 # Fishao AutoFisher
 
-Tato obnova vychází z commitu `a94c4fd` a obsahuje zachované opravy nahození z verze 1.1.8. Původní commit 1.1.8 obsahoval také novější vzhled a funkce agenta.
+Tato rekonstrukce vychází z commitu `a94c4fd`. Obnovuje opravy nahození, čtení výbavy a sledování minihry. Rozhraní má opět světlé barvy, statistiky vedle náhledu a přepínač **Lovit v překrytém okně**. Původní plánování misí, nákup energie a registrace do turnajů v této rekonstrukci chybí.
+
+Z kořene projektu lze v CMD po instalaci 64bitového Pythonu 3.14 spustit:
+
+```bat
+py -3.14 setup_windows.py
+```
+
+Skript spravuje místní prostředí `.venv` a vytvoří zástupce s ikonkou Tkinteru. Režim překrytého okna vyžaduje, aby Windows a hra poskytly obraz a přijaly vstup do okna. Při chybě režim vypni a ponech hru v popředí.
 
 Windows 11, 64bitový CPython 3.14. Balíček obsahuje záznamník, offline přehrávač, asistenci a automat opakovaného lovu z připraveného místa u vody.
 

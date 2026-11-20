@@ -6,13 +6,14 @@ from unittest.mock import ANY, Mock, call, patch
 
 import cv2
 import numpy as np
+import win32con
 
 from bot import Auto, Cycle, Phase
-from controls import Controls
+from controls import BackgroundControls, Controls
 from game_ui import Hud, Interface, Inventory, SIZE
 from minigame import Balance, BalancePolicy
 from spots import CastTarget
-from window import Region
+from window import FrameUnavailable, Region, WindowCapture
 
 
 class AutoTest(unittest.TestCase):
@@ -55,6 +56,57 @@ class AutoTest(unittest.TestCase):
         patch_image = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
         self.assertIsNone(ui.number(patch_image, white=True))
         self.assertEqual(ui._gear_count(patch_image), 45)
+
+    def test_covered_window_cast_targets_the_same_window_twice(self) -> None:
+        with patch.object(Controls, "__init__", return_value=None):
+            controls = BackgroundControls("FISHAO - Reborn")
+        point = 275 | (190 << 16)
+        with (patch("controls.sleep") as delay, patch.object(controls, "_point", return_value=point),
+              patch.object(controls, "_post", return_value=True) as post):
+            self.assertTrue(controls.cast(self.region, .43, .35, cancelled=lambda: False))
+            self.assertEqual(post.call_args_list, [
+                call(self.region.hwnd, win32con.WM_MOUSEMOVE, 0, point),
+                call(self.region.hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, point),
+                call(self.region.hwnd, win32con.WM_LBUTTONUP, 0, point),
+            ] * 2)
+            self.assertEqual(delay.call_args_list, [call(.055), call(.035), call(.055)])
+
+    def test_covered_capture_validates_size_and_crops_client_image(self) -> None:
+        region = Region(4, 47, 61, 8, 6)
+        image = np.arange(144, dtype=np.uint8).reshape(6, 8, 3)
+        with WindowCapture("FISHAO - Reborn", background=True) as capture, (
+            patch.object(capture, "_background_region", return_value=region)
+        ), patch.object(capture, "_background_frame", return_value=image) as frame:
+            crop, reported = capture.grab((4, 2, 3, 4), expected=(8, 6))
+            self.assertEqual(reported, region)
+            np.testing.assert_array_equal(crop, image[2:6, 4:7])
+            with self.assertRaises(FrameUnavailable):
+                capture.grab((4, 2, 3, 4), expected=(9, 6))
+            frame.assert_called_once_with(region)
+
+    def test_covered_input_releases_message_key_before_native_key(self) -> None:
+        def init(controls):
+            controls.held = None
+
+        with patch.object(Controls, "__init__", init):
+            controls = BackgroundControls("FISHAO - Reborn")
+        hwnd = self.region.hwnd
+        with (
+            patch("controls.win32gui.GetForegroundWindow", return_value=20) as focus,
+            patch("controls.win32gui.IsIconic", return_value=False),
+            patch.object(controls, "_game_window", return_value=True),
+            patch.object(controls, "_key", return_value=True) as message,
+            patch.object(controls, "_arrow") as native,
+        ):
+            controls.direction(hwnd, "left")
+            message.assert_called_once_with(hwnd, win32con.VK_LEFT, 0x4B, up=False, extended=True)
+            focus.return_value = hwnd
+            controls.direction(hwnd, "left")
+            self.assertEqual(message.call_args_list[-1],
+                             call(hwnd, win32con.VK_LEFT, 0x4B, up=True, extended=True))
+            controls.release()
+            self.assertEqual(native.call_args_list, [call("left", up=False), call("left", up=True)])
+            self.assertIsNone(controls.held)
 
     def test_waits_for_energy_and_requires_two_cast_points(self) -> None:
         available = (0.9,.5)

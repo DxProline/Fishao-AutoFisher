@@ -5,7 +5,7 @@ from enum import Enum
 from time import perf_counter
 
 from assist import TARGET_HZ, TRACK_MISSES, Assist
-from controls import Controls
+from controls import BackgroundControls, Controls
 from game_ui import Hud, Interface, Inventory, Point
 from minigame import BalanceDetector, BalancePolicy, PixelBox
 from recorder import NS
@@ -73,8 +73,8 @@ class Cycle:
 class Auto(Assist):
     """Opakování ověřených akcí nad obrazem hry, v samostatném vlákně."""
 
-    def __init__(self, max_casts: int | None = None) -> None:
-        super().__init__()
+    def __init__(self, max_casts: int | None = None, *, background: bool = False) -> None:
+        super().__init__(background=background)
         self.max_casts = max_casts
         self.name = "AutoFish"
 
@@ -94,6 +94,7 @@ class Auto(Assist):
         next_preview = active = 0.
         last_tick: float | None = None
         crop_misses = 0
+        arrow_logged = False
         while not self.stopping:
             tick = perf_counter()
             if self.paused:
@@ -136,6 +137,12 @@ class Auto(Assist):
                 crop_misses = 0
                 if cycle.phase is Phase.CAST:
                     cycle.casts += 1
+                if cycle.phase is not Phase.BALANCE:
+                    self._log.info("Záběr rozpoznán.")
+                    arrow_logged = False
+                if not arrow_logged and direction is not None and controls.held == direction:
+                    self._log.info("První šipka po záběru: %s.", "doleva" if direction == "left" else "doprava")
+                    arrow_logged = True
                 cycle.advance(Phase.BALANCE, active)
                 last_seen = active
                 expected = (region.width,region.height)
@@ -231,6 +238,8 @@ class Auto(Assist):
                 if balance:
                     self._annotate(preview,balance,selected_crop)
                 self._update(preview=(round(tick*NS),preview))
+            if isinstance(controls, BackgroundControls) and controls.problem:
+                message = controls.problem
             self._update(text=message,casts=cycle.casts,caught=cycle.caught,escaped=cycle.escaped,
                          active_ns=round(active*NS), tracking_fps=tracking_fps)
             interval = 1/TARGET_HZ if crop else .06

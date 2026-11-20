@@ -22,7 +22,7 @@ class Balance:
 
 
 class BalanceDetector:
-    """Zelený střed a dvojice modrých hrotů z dialogu YOU HAVE A BITE."""
+    """Zelený střed a modré hroty z dialogu YOU HAVE A BITE."""
 
     def __init__(self) -> None:
         self._prior: PixelBox | None = None
@@ -61,13 +61,18 @@ class BalanceDetector:
             x, y, w, h = cv2.boundingRect(contour)
             if w < 62 or h < 7 or not 5 <= w / h <= 15 or cv2.contourArea(contour) < w * h * 0.78:
                 continue
-            hue = hsv[y + h // 2, x : x + w, 0]
-            color = [int(hue[round((w - 1) * pos)]) for pos in (0.04, 0.18, 0.50, 0.82, 0.96)]
-            first, near_left, center, near_right, last = color
-            if not ((first <= 14 or first >= 170) and (last <= 14 or last >= 170)
-                    and 18 <= near_left <= 49 and 18 <= near_right <= 49 and 47 <= center <= 79):
+            rows = hsv[y + h // 4 : y + 3 * h // 4 + 1, x : x + w]
+            hue, saturation, value = cv2.split(rows)
+            vivid = (saturation >= 145) & (value >= 120)
+            red_columns = np.mean(vivid & ((hue <= 16) | (hue >= 170)), axis=0)
+            yellow_columns = np.mean(vivid & (hue >= 17) & (hue <= 49), axis=0)
+            green_columns = np.mean(vivid & (hue >= 47) & (hue <= 79), axis=0)
+            edge, middle = max(1, round(w * .12)), round(w * .30)
+            if (min(red_columns[:edge].mean(), red_columns[-edge:].mean()) < .35
+                    or min(yellow_columns[edge:middle].mean(), yellow_columns[-middle:-edge].mean()) < .35
+                    or green_columns[middle:-middle].mean() < .45):
                 continue
-            band = np.flatnonzero((hue >= 47) & (hue <= 79))
+            band = np.flatnonzero(green_columns >= .50)
             if band.size < w * 0.15:
                 continue
             marker = BalanceDetector._marker(hsv, x, y, w, h)
@@ -83,8 +88,10 @@ class BalanceDetector:
         depth = max(3, round(h * 0.40))
         mask = cv2.inRange(hsv[max(0, y - reach) : min(hsv.shape[0], y + h + reach), x : x + w],
                            (88, 115, 95), (135, 255, 255))
-        upper = mask[:reach + depth, :]
-        lower = mask[-reach - depth :, :]
+        top_border = min(y, reach)
+        bottom_border = min(hsv.shape[0] - y - h, reach)
+        upper = mask[:top_border + depth, :]
+        lower = mask[-bottom_border - depth :, :]
 
         def centers(part: Image) -> list[float]:
             count, _, statistics, points = cv2.connectedComponentsWithStats(part)
@@ -94,11 +101,21 @@ class BalanceDetector:
                 and statistics[i, cv2.CC_STAT_WIDTH] <= h * 0.80
             ]
 
-        pairs = [(abs(a - b), (a + b) / 2) for a in centers(upper) for b in centers(lower)]
-        if not pairs:
+        a, b = centers(upper), centers(lower)
+        pairs = [(abs(left - right), (left + right) / 2) for left in a for right in b]
+        if pairs:
+            distance, center = min(pairs)
+            if distance <= max(3, h * 0.22):
+                return center
+        # Na ověřené liště stačí jeden hrot, pokud zasahuje do její vnitřní plochy.
+        if len(a) == 1 and not b:
+            center, inside = a[0], upper[top_border:]
+        elif len(b) == 1 and not a:
+            center, inside = b[0], lower[:depth]
+        else:
             return None
-        distance, center = min(pairs)
-        return center if distance <= max(3, h * 0.22) else None
+        column = round(center)
+        return center if np.any(inside[:, max(0, column - 2):column + 3]) else None
 
 
 class BalancePolicy:
