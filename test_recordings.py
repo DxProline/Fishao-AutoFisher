@@ -184,6 +184,30 @@ class RecordedWorkflow(unittest.TestCase):
         self.assertLess(450, point[0] * 900)
         self.assertLess(point[0] * 900, 550)
 
+    def test_olive_pond_requires_casting_rim_and_rejects_textured_ground(self) -> None:
+        height, width = 485, 900
+        pond_end = 235
+        center, radius = (450, 240), 147
+        hsv = np.full((height, width, 3), (41, 248, 167), np.uint8)
+        hsv[:pond_end, 240:675] = (28, 150, 130)
+        # Pruh stejného odstínu na souši bez jednolitého povrchu.
+        hsv[300:, :, :2] = (28, 150)
+        hsv[300:, ::2, 2] = 109
+        hsv[300:, 1::2, 2] = 171
+        scene = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+        cv2.ellipse(scene, (450, 212), (14, 13), 0, 0, 360, (170, 50, 105), -1)
+        wet = casting_hover(scene)
+        self.assertIsNotNone(wet)
+        self.assertLess(wet[1] * height, pond_end)
+        with patch("spots._circles", return_value=[(.8, *center, radius)]):
+            self.assertIsNone(casting_target(scene))
+        cv2.circle(scene, center, radius, (88, 167, 170), 3, cv2.LINE_AA)
+        target = casting_target(scene, preferred=(.50, .76))
+        self.assertIsNotNone(target)
+        x, y = target.point[0] * width, target.point[1] * height
+        self.assertLess(y, pond_end)
+        self.assertLess(np.hypot(x - center[0], y - center[1]), radius)
+
     def test_pier_uses_only_the_nearest_side_of_the_water(self) -> None:
         scene = np.full((550, 760, 3), (207, 134, 20), np.uint8)
         scene[:, 308:414] = (55, 118, 185)
