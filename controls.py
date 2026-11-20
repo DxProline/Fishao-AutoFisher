@@ -36,6 +36,7 @@ class NativeInput(ctypes.Structure):
 
 class Controls:
     _SCANS = {"left": 0x4B, "right": 0x4D}
+    _WALK_SCANS = {"w": 0x11, "a": 0x1E, "s": 0x1F, "d": 0x20}
 
     def __init__(self) -> None:
         self._user = ctypes.WinDLL("user32", use_last_error=True)
@@ -130,6 +131,22 @@ class Controls:
         sleep(.035)
         if not cancelled() and self.pointer_at(region, x, y):
             self.click(region, x, y)
+        return True
+
+    def walk(self, hwnd: int, key: str, *, cancelled: Callable[[], bool] = lambda: False) -> bool:
+        scan = self._WALK_SCANS[key]
+        if cancelled() or win32gui.GetForegroundWindow() != hwnd:
+            return False
+        down = NativeInput(1, InputValue(key=KeyInput(0, scan, 0x0008, 0, 0)))
+        up = NativeInput(1, InputValue(key=KeyInput(0, scan, 0x000A, 0, 0)))
+        self._inputs(down)
+        try:
+            for _ in range(5):
+                if cancelled() or win32gui.GetForegroundWindow() != hwnd:
+                    break
+                sleep(.04)
+        finally:
+            self._inputs(up)
         return True
 
     def escape(self, hwnd: int) -> bool:
@@ -248,6 +265,23 @@ class BackgroundControls(Controls):
         if self._key(hwnd, vk, self._SCANS[requested], up=False, extended=True):
             self.held = requested
             self._held_window = hwnd
+
+    def walk(self, hwnd: int, key: str, *, cancelled: Callable[[], bool] = lambda: False) -> bool:
+        if not self._game_window(hwnd) or win32gui.IsIconic(hwnd) or cancelled():
+            return False
+        if win32gui.GetForegroundWindow() == hwnd:
+            return super().walk(hwnd, key, cancelled=cancelled)
+        scan = self._WALK_SCANS[key]
+        if not self._key(hwnd, ord(key.upper()), scan, up=False):
+            return False
+        try:
+            for _ in range(5):
+                if cancelled():
+                    break
+                sleep(.04)
+        finally:
+            released = self._key(hwnd, ord(key.upper()), scan, up=True)
+        return released
 
     def escape(self, hwnd: int) -> bool:
         if not self._game_window(hwnd) or win32gui.IsIconic(hwnd):

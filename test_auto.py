@@ -10,9 +10,8 @@ import win32con
 
 from activities import Action, Activities, Panel
 from assist import PreviewClock
-from destinations import CURRENT, Destination, Navigator, TravelSettings
+from destinations import CURRENT, LAKETOWN, Destination, Navigator, TravelSettings
 from gui import App
-from tournament import BOXES, Tournament
 from bot import Auto, Cycle, Phase
 from controls import BackgroundControls, Controls
 from game_ui import EnergyShop, Hud, Interface, Inventory, Match, SIZE, Match
@@ -313,16 +312,17 @@ class AutoTest(unittest.TestCase):
         water = (.5, .3)
         target = CastTarget(water, walk, .16, .54)
         hud = Hud(8, 20, 20, True, (.95, .55), (.95, .73))
-        with patch("bot.shore_approach", return_value=walk), patch("bot.casting_hover", return_value=None):
+        with (patch("bot.shore_approach", return_value=walk), patch("bot.casting_hover", return_value=None),
+              patch("bot.walking_direction", return_value="w")):
             with patch("bot.casting_target", return_value=None):
                 auto._ready(self.cycle, hud, self.frame, 1., self.controls, self.region)
                 self.controls.click.assert_not_called()
                 auto._ready(self.cycle, hud, self.frame, 2., self.controls, self.region)
-            self.controls.click.assert_called_once_with(self.region, *walk)
+            self.controls.walk.assert_called_once_with(self.region.hwnd, "w", cancelled=ANY)
             with patch("bot.casting_target", return_value=target):
-                auto._ready(self.cycle, hud, self.frame, 2.5, self.controls, self.region)
+                auto._ready(self.cycle, hud, self.frame, 2.2, self.controls, self.region)
                 auto._ready(self.cycle, hud, self.frame, 4., self.controls, self.region)
-                self.assertEqual(self.controls.click.call_count, 1)
+                self.controls.click.assert_not_called()
                 auto._ready(self.cycle, hud, self.frame, 5., self.controls, self.region)
             self.controls.cast.assert_called_once_with(self.region, *water, cancelled=ANY)
             self.assertEqual(self.cycle.phase, Phase.CAST)
@@ -414,43 +414,37 @@ class AutoTest(unittest.TestCase):
         self.controls.escape.assert_called_once()
         self.assertEqual(auto.snapshot().caught, 1)
 
-    def test_tournament_validates_price_and_requires_two_frames(self) -> None:
-        import tempfile
-        from pathlib import Path
+    def test_laketown_after_map_selection_walks_and_hands_off_without_bakery(self) -> None:
+        place = Destination(LAKETOWN, "Laketown")
+        nav = Navigator(TravelSettings(place, (place,)))
+        nav.map_pending = True
+        hud = Hud(8, 40, 8, True, (.9, .5), (.9, .7))
+        with (patch.object(nav, "match", return_value=None),
+              patch("destinations.shore_approach", side_effect=[(.46, .50), (.46, .50), None]),
+              patch("destinations.walking_direction", return_value="a"),
+              patch("destinations.casting_hover", return_value=(.41, .50))):
+            for now in (3., 3.2):
+                self.assertIn("břehu", nav.tick(self.frame, self.frame, hud, True, 0, now,
+                                               self.controls, self.region))
+            self.controls.walk.assert_called_once_with(self.region.hwnd, "a", cancelled=ANY)
+            self.assertIsNone(nav.tick(self.frame, self.frame, hud, True, 0, 4.,
+                                        self.controls, self.region))
+        self.assertFalse(nav.visit)
+        self.controls.click.assert_not_called()
 
-        random = np.random.default_rng(1)
-        hud, panel = self.frame.copy(), self.frame.copy()
-        tiles = {}
-        for key, (x, y, r, b) in BOXES.items():
-            tile = random.integers(0, 256, size=(b-y,r-x,3), dtype=np.uint8)
-            tiles[key] = tile
-            if key == "icon":
-                hud[y:b, x:r] = tile
-            if key != "icon":
-                panel[y:b, x:r] = tile
-        ui = Mock()
-        ui.number.side_effect = lambda _, white: 5 if white else 20
-        with tempfile.TemporaryDirectory() as root:
-            path = Path(root) / "profile.npz"
-            np.savez_compressed(path, fee=np.int64(5), **tiles)
-            tournament = Tournament(ui, path)
-            with patch("tournament._signup_active", return_value=True):
-                tournament.tick(hud, True, 31., self.controls, self.region)
-                self.controls.click.assert_not_called()
-                tournament.tick(hud, True, 32., self.controls, self.region)
-                self.assertEqual(self.controls.click.call_count, 1)
-                tournament.tick(panel, False, 33., self.controls, self.region)
-                self.assertEqual(self.controls.click.call_count, 1)
-                self.assertEqual(tournament.tick(panel, False, 33.5, self.controls, self.region), "Přihlašuji turnaj.")
-                self.assertEqual(self.controls.click.call_count, 2)
-                self.assertEqual(tournament.last_signup, 33.5)
-                self.assertIsNone(tournament.tick(panel, False, 34., self.controls, self.region))
-
-                tournament = Tournament(ui, path)
-                ui.number.side_effect = lambda _, white: 6 if white else 20
-                tournament.tick(panel, False, 40., self.controls, self.region)
-                self.assertEqual(tournament.tick(panel, False, 41., self.controls, self.region), "Zavírám turnaje.")
-                self.assertEqual(tournament.last_signup, -600.)
+    def test_wasd_background_messages_include_key_release(self) -> None:
+        controls = BackgroundControls("Fishao test")
+        region = self.region
+        with (patch.object(controls, "_game_window", return_value=True),
+              patch("controls.win32gui.IsIconic", return_value=False),
+              patch("controls.win32gui.GetForegroundWindow", return_value=0),
+              patch("controls.sleep"), patch.object(controls, "_key", return_value=True) as key_message):
+            for key, scan in (("w", 0x11), ("a", 0x1E), ("s", 0x1F), ("d", 0x20)):
+                self.assertTrue(controls.walk(region.hwnd, key))
+                self.assertEqual(key_message.call_args_list[-2:], [
+                    call(region.hwnd, ord(key.upper()), scan, up=False),
+                    call(region.hwnd, ord(key.upper()), scan, up=True),
+                ])
 
     def test_navigator_does_not_leave_timed_pond(self) -> None:
         initial = Destination("Rybník A", "Laketown")

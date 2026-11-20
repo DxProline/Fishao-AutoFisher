@@ -16,7 +16,6 @@ from assist import Assist
 from bot import Auto
 from destinations import CURRENT, Destination, Marker, TravelSettings
 from game_ui import Interface, Point
-from tournament import Tournament
 from hotkeys import Hotkeys
 from recorder import NS, Recorder, Status
 from version import VERSION
@@ -63,7 +62,6 @@ class App:
         self.fishing_place = tk.StringVar(master=root, value=CURRENT)
         self.places_folder = output_dir / "destinations"
         self.places = Destination.load_all(self.places_folder) if autofish else []
-        self.tournament_profile = output_dir / "tournament.npz"
         self.autofish = autofish
         self.action_name = "lov" if autofish else "asistenci" if assist else "záznam"
         if autofish:
@@ -227,8 +225,6 @@ class App:
                 style="Options.TCheckbutton",
             )
             self.tournament_option.pack(fill="x", padx=(14, 0))
-            self.tournament_setup = ttk.Button(sidebar, text="Vlastní profil turnajů…", command=self._setup_tournament)
-            self.tournament_setup.pack(anchor="w", pady=(0, 4))
             self.background_option = ttk.Checkbutton(sidebar, text="Lovit v překrytém okně",
                                                      variable=self.background, style="Options.TCheckbutton",
                                                      command=self._update_preview_hint)
@@ -252,22 +248,6 @@ class App:
             self.metrics[label] = tk.StringVar(master=self.root, value="–")
             ttk.Label(row, textvariable=self.metrics[label], style="Metric.TLabel",
                       anchor="e", width=9).pack(side="right")
-
-    def _setup_tournament(self) -> None:
-        paths = []
-        for title in ("Snímek celého okna hry s ikonou turnaje", "Snímek okna s aktivní přihláškou do turnaje"):
-            name = filedialog.askopenfilename(parent=self.root, title=title,
-                                              filetypes=[("Snímky", "*.png *.jpg *.jpeg")])
-            if not name:
-                return
-            paths.append(Path(name))
-        try:
-            fee = Tournament.calibrate(self.tournament_profile, *[Interface._image(p) for p in paths])
-        except (OSError, ValueError, cv2.error) as exc:
-            messagebox.showerror("Nastavení turnajů", str(exc), parent=self.root)
-            return
-        messagebox.showinfo("Nastavení turnajů", f"Ověřené vstupné: {fee} mincí.", parent=self.root)
-        self._buttons()
 
     def _pick_marker(self, title: str) -> Marker | None:
         filename = filedialog.askopenfilename(parent=self.root, title=title,
@@ -368,9 +348,9 @@ class App:
                                    state="normal" if active and not stopping else "disabled")
         if self.autofish:
             self.agent_option.configure(state="disabled" if active else "normal")
-            self.tournament_option.configure(state="disabled" if active or not (self.agent.get() or self.tournament_profile.is_file()) else "normal")
+            self.tournament_option.configure(state="disabled" if active or not self.agent.get() else "normal")
             self.background_option.configure(state="disabled" if active else "normal")
-            for option in (self.tournament_setup, *self.travel_options):
+            for option in self.travel_options:
                 option.configure(state="disabled" if active else "normal")
             self.place_picker.configure(state="disabled" if active else "readonly")
 
@@ -390,11 +370,9 @@ class App:
                 place = next(p for p in self.places if p.name == self.fishing_place.get())
                 travel = TravelSettings(place, tuple(self.places), self.refill_bread.get(),
                                         self.rotate_ponds.get(), self.rotate_maps.get())
-                profile = self.tournament_profile if self.join_tournaments.get() and self.tournament_profile.is_file() else None
                 self.recorder = Auto(self.auto_casts, xp_farm=self.xp_farm, agent=self.agent.get(),
                                      background=self.background.get(),
-                                     join_tournaments=self.join_tournaments.get(), travel=travel,
-                                     tournament_profile=profile)
+                                     join_tournaments=self.join_tournaments.get(), travel=travel)
             else:
                 self.recorder = Assist(self.cast_once) if self.assist else Recorder(
                     self.output_dir, self.fps, image_format=self.image_format)

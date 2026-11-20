@@ -246,7 +246,7 @@ def avatar_feet(image: Image, near: Point) -> Point | None:
     frame = _scene(image)
     height, width = frame.shape[:2]
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    avatars = _avatars(hsv)
+    avatars = _shore_avatars(hsv)
     if len(avatars) != 1:
         return None
     x, y, _, hat = avatars[0]
@@ -255,6 +255,30 @@ def avatar_feet(image: Image, near: Point) -> Point | None:
     if not (2 <= sx < width - 2 and 2 <= sy < height - 2) or water[sy-2:sy+3, sx-2:sx+3].any():
         return None
     return x / width, (y + 1.25 * hat) / height
+
+
+def walking_direction(image: Image, target: Point) -> str | None:
+    """Vybere osu krátkého kroku a ověří, že vede po souši."""
+    frame = _scene(image)
+    height, width = frame.shape[:2]
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    avatars = _shore_avatars(hsv)
+    if len(avatars) != 1:
+        return None
+    x, y, _, hat = avatars[0]
+    x, y = round(x), round(y + 1.25 * hat)
+    dx, dy = target[0] * width - x, target[1] * height - y
+    water = _open_water(hsv)
+    walkable = _castable_view(width, height) & ~water
+    for delta, horizontal in sorted(((dx, True), (dy, False)), key=lambda pair: abs(pair[0]), reverse=True):
+        if abs(delta) < 4:
+            continue
+        stride = int(np.clip(round(delta), -hat, hat))
+        offsets = np.rint(np.linspace(0, stride, abs(stride) + 1)).astype(int)
+        xs, ys = (x + offsets, y) if horizontal else (x, y + offsets)
+        if np.all((0 <= xs) & (xs < width)) and np.all((0 <= ys) & (ys < height)) and walkable[ys, xs].all():
+            return ("d" if stride > 0 else "a") if horizontal else ("s" if stride > 0 else "w")
+    return None
 
 
 def shore_approach(image: Image, *, max_distance_hats: float = 12) -> Point | None:

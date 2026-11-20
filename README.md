@@ -116,8 +116,6 @@ Na kartě **Lovná místa** vyber aktuální místo, rybník u pekárny v Laketo
 
 Volba **Vyzvednout bezplatný chléb u Jamieho** spouští cestu po vyčerpání návnady. U aktuálního místa aplikace potřebuje vidět dveře pekárny. U zvoleného lovného místa může použít mapu. Nabídku potvrdí až po rozpoznání Jamieho dialogu, počká na potvrzení přijetí návnady a v inventáři hledá ikonu chleba. Po doplnění se vrátí k vybranému břehu. Při aktivním odpočtu v Trout Farm zůstává v místě a použije zásoby z inventáře.
 
-Tlačítkem **Vlastní profil turnajů…** můžeš nahradit vestavěné rozpoznání. Vyber dva snímky samotného herního okna bez rámu a plochy. První zachyť s ikonou turnajů na běžné herní liště a druhý s otevřeným panelem a aktivní přihláškou. Aplikace kontroluje cenu v herních mincích a odešle přihlášku při shodě se zaznamenaným vstupným a dostatečném zůstatku.
-
 Hra a automat musí mít stejnou úroveň oprávnění Windows. Průchod AutoFish, minihra i přihlášení na základě referencí se testují simulací. Probíhající hod může skončit i bez úlovku. AutoFish se řídí stavem hry a při nejasném obraze vyčkává.
 
 Testy balíčku spusť příkazem `& $python -B -m unittest -v`.

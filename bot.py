@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
 from time import perf_counter
 
 from activities import Activities
@@ -13,8 +12,7 @@ from game_ui import EnergyShop, Hud, Interface, Inventory, Point
 from minigame import BalanceDetector, BalancePolicy, PixelBox
 from progression import Progression
 from recorder import NS
-from spots import CastTarget, casting_hover, casting_target, shore_approach, timed_farm
-from tournament import Tournament
+from spots import CastTarget, casting_hover, casting_target, shore_approach, timed_farm, walking_direction
 from window import FrameUnavailable, Image, Region, WindowCapture
 
 
@@ -111,7 +109,7 @@ class Auto(Assist):
 
     def __init__(self, max_casts: int | None = None, *, xp_farm: bool = False, agent: bool = False,
                  background: bool = False, join_tournaments: bool = False,
-                 tournament_profile: Path | None = None, travel: TravelSettings | None = None) -> None:
+                 travel: TravelSettings | None = None) -> None:
         super().__init__(background=background)
         self.xp_farm = xp_farm
         self.name = "Agent Fishao" if agent else "XP Farm" if xp_farm else "AutoFish"
@@ -119,15 +117,13 @@ class Auto(Assist):
         self.join_tournaments = join_tournaments
         self.max_casts = max_casts
         self.travel = travel
-        self.tournament_profile = tournament_profile
 
     def _limit_reached(self, cycle: Cycle) -> bool:
         return self.max_casts is not None and cycle.casts >= self.max_casts
 
     def _loop(self, capture: WindowCapture, controls: Controls) -> str:
         ui, detector, policy = Interface(), BalanceDetector(), BalancePolicy()
-        activities = Activities(ui, join_tournaments=self.join_tournaments and self.tournament_profile is None) if self.agent else None
-        tournament = Tournament(ui, self.tournament_profile) if self.tournament_profile else None
+        activities = Activities(ui, join_tournaments=self.join_tournaments) if self.agent else None
         navigator = Navigator(self.travel) if self.travel else None
         allow_auto_farm = (self.travel is None or self.travel.destination.name == CURRENT
                            and not (self.travel.ponds or self.travel.maps))
@@ -150,8 +146,6 @@ class Auto(Assist):
             if self.paused:
                 if navigator:
                     navigator.reset_confirmation()
-                if tournament:
-                    tournament.previous = None
                 if activities:
                     activities.reset_observation()
                 if progression:
@@ -171,8 +165,6 @@ class Auto(Assist):
             except FrameUnavailable as exc:
                 if navigator:
                     navigator.reset_confirmation()
-                if tournament:
-                    tournament.previous = None
                 if activities:
                     activities.reset_observation()
                 if progression:
@@ -316,13 +308,11 @@ class Auto(Assist):
                 can_travel = cycle.phase in (Phase.READY, Phase.ENERGY) and not inventory and not result
                 if navigator and can_travel:
                     activity = navigator.tick(image, frame, hud, stable, cycle.casts, active, controls, region,
-                                              timed=farm)
+                                              timed=farm, cancelled=lambda: self.stopping or self.paused)
                     if activity:
                         cycle.candidate = cycle.shore_step = None
                         if navigator.wants_bread and hud:
                             self._open_gear(cycle, "bait", hud.bait_button, active, controls, region, bread_only=True)
-                if not activity and tournament and not farm and can_travel:
-                    activity = tournament.tick(image, bool(stable and hud and hud.energy), active, controls, region)
                 if (not activity and activities and not farm and cycle.phase in (Phase.READY, Phase.ENERGY)
                         and not inventory and not result
                         and not self.stopping and not self.paused):
@@ -426,10 +416,11 @@ class Auto(Assist):
                 step = shore_approach(frame)
                 previous, cycle.shore_step = cycle.shore_step, step
                 if step and previous and max(abs(a - b) for a, b in zip(step, previous)) <= .012:
-                    if controls.click(region, *step):
+                    key = walking_direction(frame, step)
+                    if key and controls.walk(region.hwnd, key, cancelled=lambda: self.stopping or self.paused):
                         cycle.shore_step = None
                         cycle.shore_moves += 1
-                        cycle.next_step = now + 1.15
+                        cycle.next_step = now + .42
                         cycle.candidate = None
                         self._log.info("Přesun k břehu před měřením dosahu prutu.")
                         return "Přicházím k vodě."
