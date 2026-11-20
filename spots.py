@@ -9,8 +9,8 @@ import numpy as np
 from window import Image
 
 Point = tuple[float, float]
-OLIVE_LOW = (26, 112, 95)
-OLIVE_HIGH = (32, 190, 213)
+OLIVE_LOW = (26, 82, 95)
+OLIVE_HIGH = (32, 190, 255)
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +58,7 @@ def _open_water(hsv: Image) -> np.ndarray:
     if cv2.countNonZero(olive) >= olive.size * .024:
         change = cv2.morphologyEx(hsv[:, :, 2], cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
         smooth_olive = cv2.bitwise_and(olive, cv2.inRange(change, 0, 19))
-        seeds = cv2.inRange(hsv, (27, 125, 100), (30, 177, 191))
+        seeds = cv2.inRange(hsv, (27, 108, 100), (30, 177, 207))
         water |= _water_surfaces(smooth_olive, cv2.bitwise_and(seeds, smooth_olive))
     return water
 
@@ -158,7 +158,22 @@ def _shore_avatars(hsv: Image) -> list[tuple[float, float, int, int]]:
     return central or avatars
 
 
-def shore_approach(image: Image) -> Point | None:
+def avatar_feet(image: Image, near: Point) -> Point | None:
+    frame = _scene(image)
+    height, width = frame.shape[:2]
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    avatars = _avatars(hsv)
+    if len(avatars) != 1:
+        return None
+    x, y, _, hat = avatars[0]
+    sx, sy = round(near[0] * width), round(near[1] * height)
+    water = _open_water(hsv)
+    if not (2 <= sx < width - 2 and 2 <= sy < height - 2) or water[sy-2:sy+3, sx-2:sx+3].any():
+        return None
+    return x / width, (y + 1.25 * hat) / height
+
+
+def shore_approach(image: Image, *, max_distance_hats: float = 12) -> Point | None:
     """Krátký krok po souši, pokud je jedna postava a voda v dosažitelné blízkosti."""
     frame = _scene(image)
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -178,7 +193,7 @@ def shore_approach(image: Image) -> Point | None:
         return None
     row, col = np.unravel_index(np.where(depth >= 4, squared, np.inf).argmin(), depth.shape)
     distance = float(np.hypot(col - feet[0], row - feet[1]))
-    if not .85 * hat < distance <= 12 * hat:
+    if not .85 * hat < distance <= max_distance_hats * hat:
         return None
     path = np.rint(np.linspace(feet, (col, row), max(2, round(distance)))).astype(int)
     if not ((0 <= path[:, 0]).all() and (path[:, 0] < width).all()

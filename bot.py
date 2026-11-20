@@ -7,6 +7,7 @@ from time import perf_counter
 
 from assist import TARGET_HZ, TRACK_MISSES, Assist, PreviewClock
 from controls import BackgroundControls, Controls
+from destinations import Navigator, TravelSettings
 from game_ui import Hud, Interface, Inventory, Point
 from minigame import BalanceDetector, BalancePolicy, PixelBox
 from recorder import NS
@@ -54,6 +55,7 @@ class Cycle:
     shore_moves: int = 0
     next_step: float = 0.
     basic_rod: bool | None = None
+    bread_only: bool = False
 
     def reset_range(self, now: float) -> None:
         self.candidate = self.position = self.shore_step = None
@@ -86,11 +88,13 @@ class Auto(Assist):
     """Opakování ověřených akcí nad obrazem hry, v samostatném vlákně."""
 
     def __init__(self, max_casts: int | None = None, *, background: bool = False,
-                 agent: bool = False, tournament_profile: Path | None = None) -> None:
+                 agent: bool = False, tournament_profile: Path | None = None,
+                 travel: TravelSettings | None = None) -> None:
         super().__init__(background=background)
         self.max_casts = max_casts
         self.agent = agent
         self.tournament_profile = tournament_profile
+        self.travel = travel
         self.name = "AutoFish"
 
     def _limit_reached(self, cycle: Cycle) -> bool:
@@ -99,6 +103,7 @@ class Auto(Assist):
     def _loop(self, capture: WindowCapture, controls: Controls) -> str:
         ui, detector, policy = Interface(), BalanceDetector(), BalancePolicy()
         tournament = Tournament(ui, self.tournament_profile) if self.tournament_profile else None
+        navigator = Navigator(self.travel) if self.travel else None
         cycle = Cycle()
         crop: PixelBox | None = None
         expected: tuple[int,int] | None = None
@@ -115,6 +120,8 @@ class Auto(Assist):
         while not self.stopping:
             tick = perf_counter()
             if self.paused:
+                if navigator:
+                    navigator.reset_confirmation()
                 if tournament is not None:
                     tournament.previous = None
                 controls.release()
@@ -130,6 +137,8 @@ class Auto(Assist):
             try:
                 frame, region = capture.grab(crop, expected=expected if crop else None)
             except FrameUnavailable as exc:
+                if navigator:
+                    navigator.reset_confirmation()
                 if tournament is not None:
                     tournament.previous = None
                 controls.release()
@@ -198,6 +207,9 @@ class Auto(Assist):
                     self._log.info("Výsledek: %s. Úlovky: %s.", result, cycle.caught)
                 inventory = ui.inventory(image)
                 hud = ui.hud(image)
+                timed = not inventory and not result and cycle.phase in (
+                    Phase.READY, Phase.ENERGY, Phase.WAIT,
+                ) and ui.timed_fishing(image)
                 key = (hud.energy, hud.rod, hud.bait, hud.basic_rod) if (
                     hud and hud.ready and not inventory and not result
                 ) else None
@@ -244,19 +256,29 @@ class Auto(Assist):
                     if hud and not hud.ready and not inventory and not result:
                         cycle.saw_waiting_hud = True
                     # Hra může ukončit hod bez minihry. Rozhoduje návrat k aktivní liště.
-                    returned = cycle.phase is Phase.RESULT or cycle.saw_waiting_hud
+                    # Obnovenou barevnou lištu bereme v časované zóně i po zmeškaném zšednutí.
+                    returned = (cycle.phase is Phase.RESULT or cycle.saw_waiting_hud
+                                or timed and repetitions >= 4 and active - cycle.since >= 2.)
                     if stable and returned:
                         cycle.finish_attempt(active)
                         if self._limit_reached(cycle):
                             return "Dosažen zvolený limit nahození. Hotovo."
                         cycle.advance(Phase.READY,active)
                 activity = None
-                if (tournament is not None and cycle.phase in (Phase.READY, Phase.ENERGY)
+                can_act = cycle.phase in (Phase.READY, Phase.ENERGY) and not inventory and not result
+                if navigator and can_act:
+                    activity = navigator.tick(image, frame, hud, stable, cycle.casts, active, controls, region,
+                                              timed=timed)
+                    if activity:
+                        cycle.candidate = cycle.shore_step = None
+                        if navigator.wants_bread and hud:
+                            self._open_gear(cycle, "bait", hud.bait_button, active, controls, region, bread_only=True)
+                if (not activity and not timed and tournament is not None and can_act
                         and hud is not None and hud.energy is not None and hud.energy > 0
-                        and not inventory and not result):
+                        ):
                     activity = tournament.tick(image, stable, active, controls, region)
-                if not activity and cycle.phase in (Phase.READY,Phase.ENERGY) and stable and hud:
-                    self._ready(cycle,hud,frame,active,controls,region)
+                if not activity and can_act and stable and hud:
+                    self._ready(cycle,hud,frame,active,controls,region,timed=timed)
                 message = cycle.phase.value
                 if hud and cycle.phase in (Phase.READY, Phase.ENERGY, Phase.WAIT):
                     message += f" · energie {hud.energy if hud.energy is not None else '?'}"
@@ -267,7 +289,8 @@ class Auto(Assist):
                 if cycle.phase is Phase.READY and active < cycle.next_step:
                     message = "Přicházím k vodě. Čekám na zastavení postavy."
                 if cycle.phase is Phase.GEAR and cycle.gear_step == "unavailable":
-                    message = "Čekám na dostupný prut nebo návnadu."
+                    message = ("Čekám na ruční výběr chleba v inventáři." if cycle.bread_only else
+                               "Čekám na dostupný prut nebo návnadu.")
                 if activity:
                     message = activity
             if preview_clock.ready(captured_at, selected_crop is not None):
@@ -283,7 +306,22 @@ class Auto(Assist):
             self._wait_frame(tick, interval, tracking=crop is not None)
         return "AutoFish vypnutý. Šipky uvolněné."
 
-    def _ready(self, cycle: Cycle, hud: Hud, frame: Image, now: float, controls: Controls, region: Region) -> str | None:
+    def _open_gear(self, cycle: Cycle, gear: str, slot: Point, now: float,
+                   controls: Controls, region: Region, *, bread_only: bool = False) -> None:
+        if self.stopping or self.paused or not controls.click(region, *slot):
+            return
+        cycle.reset_range(now)
+        cycle.gear = gear
+        cycle.bread_only = bread_only
+        cycle.gear_step = "choose"
+        cycle.attempted.clear()
+        cycle.pages.clear()
+        cycle.select_attempts = 0
+        cycle.next_action = now + .7
+        cycle.advance(Phase.GEAR, now)
+
+    def _ready(self, cycle: Cycle, hud: Hud, frame: Image, now: float, controls: Controls, region: Region,
+               *, timed: bool = False) -> str | None:
         if hud.energy is None:
             cycle.candidate = cycle.shore_step = None
             return None
@@ -303,15 +341,7 @@ class Auto(Assist):
                 cycle.candidate = cycle.shore_step = None
                 return None
             if count == 0:
-                if not self.stopping and not self.paused and controls.click(region,*slot):
-                    cycle.reset_range(now)
-                    cycle.gear = gear
-                    cycle.gear_step = "choose"
-                    cycle.attempted.clear()
-                    cycle.pages.clear()
-                    cycle.select_attempts = 0
-                    cycle.next_action = now + .7
-                    cycle.advance(Phase.GEAR,now)
+                self._open_gear(cycle, gear, slot, now, controls, region)
                 return None
         if now < cycle.next_step:
             return None
@@ -319,7 +349,7 @@ class Auto(Assist):
             preferred = cycle.candidate.point if cycle.candidate else cycle.preferred()
             target = casting_target(frame,preferred,avoid=cycle.position)
             cycle.next_scan = now if target is not None else now + .2
-            if target is None and self.agent and cycle.shore_moves < 5 and not self.stopping and not self.paused:
+            if target is None and (self.agent or timed) and cycle.shore_moves < 5 and not self.stopping and not self.paused:
                 step = shore_approach(frame)
                 previous, cycle.shore_step = cycle.shore_step, step
                 if step and previous and max(abs(a - b) for a, b in zip(step, previous)) <= .012:
@@ -356,7 +386,8 @@ class Auto(Assist):
         if cycle.gear_step in ("verify", "unavailable"):
             count = (hud.rod if cycle.gear == "rod" else hud.bait) if hud and hud.ready and inv is None else None
             basic = bool(hud and hud.ready and inv is None and cycle.gear == "rod" and hud.basic_rod)
-            if basic or count is not None and count > 0:
+            confirmed = count is not None and count > 0 and (not cycle.bread_only or hud is not None and hud.bread)
+            if basic or confirmed:
                 cycle.advance(Phase.READY,now)
                 cycle.reset_range(now)
                 if basic:
@@ -376,7 +407,8 @@ class Auto(Assist):
                 cycle.select_attempts = 1
                 cycle.next_action = now + .65
             return None
-        slot = next((point for point in inv.slots if point not in cycle.attempted),None)
+        slots = inv.bread_slots if cycle.bread_only else inv.slots
+        slot = next((point for point in slots if point not in cycle.attempted),None)
         if slot is not None:
             if controls.click(region,*slot):
                 cycle.attempted.add(slot)

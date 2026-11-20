@@ -11,6 +11,7 @@ import win32con
 from assist import PreviewClock
 from bot import Auto, Cycle, Phase
 from controls import BackgroundControls, Controls
+from destinations import CURRENT, Destination, Navigator, TravelSettings
 from game_ui import Hud, Interface, Inventory, Match, SIZE
 from gui import App
 from minigame import Balance, BalancePolicy
@@ -197,6 +198,40 @@ class AutoTest(unittest.TestCase):
         self.auto._gear(self.cycle,None,Hud(2,11,28,True,rod,bait),4.,self.controls,self.region)
         self.assertEqual(self.cycle.phase,Phase.READY)
 
+    def test_navigator_does_not_leave_timed_pond(self) -> None:
+        initial = Destination("Rybník A", "Laketown")
+        other = Destination("Rybník B", "Laketown")
+        nav = Navigator(TravelSettings(initial, (initial, other), refill=True, ponds=True))
+        hud = Hud(8, 40, 0, True, (.9, .5), (.9, .7))
+        self.assertIsNone(nav.tick(self.frame, self.frame, hud, True, 30, 1., self.controls,
+                                   self.region, timed=True))
+        self.assertEqual(nav.destination.name, initial.name)
+        self.assertFalse(nav.refill)
+        self.controls.click.assert_not_called()
+
+    def test_jamie_needs_confirmed_offer_then_receipt(self) -> None:
+        nav = Navigator(TravelSettings(Destination(CURRENT, ""), (), refill=True))
+        nav.refill = "counter"
+        hud = Hud(8, 40, None, False, (.9, .5), (.9, .7))
+        markers = {"bakery_inside": (.48, .2), "jamie_yes": (.65, .26)}
+        with patch.object(nav, "match", side_effect=lambda _, key: markers.get(key)):
+            def tick(now):
+                return nav.tick(self.frame, self.frame, hud, False, 0, now, self.controls, self.region)
+            tick(1.)
+            tick(1.1)
+            self.controls.click.assert_not_called()
+            markers["jamie_offer"] = (.55, .28)
+            tick(1.2)
+            self.controls.click.assert_not_called()
+            tick(1.3)
+            self.assertEqual(nav.refill, "receipt")
+            tick(4.)
+            self.assertEqual(nav.refill, "receipt")
+            self.controls.click.assert_called_once_with(self.region, .65, .26)
+            markers["jamie_reward"] = (.87, .15)
+            tick(4.1)
+            self.assertEqual(nav.refill, "exit")
+
     def test_changed_rod_range_requires_two_fresh_measurements(self) -> None:
         default = (.9, .5)
         hud = Hud(1, 7, 12, True, default, default)
@@ -341,6 +376,7 @@ class AutoTest(unittest.TestCase):
 
         class Ui:
             def normalize(self, image): return image
+            def timed_fishing(self, image): return False
             def inventory(self, image): return None
             def result(self, image): return "caught" if image[0, 0, 0] == caught else None
             def result_close(self, image, result): return close_button

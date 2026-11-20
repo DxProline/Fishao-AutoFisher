@@ -8,13 +8,14 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from queue import Empty, SimpleQueue
 from time import perf_counter
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import cv2
 
 from assist import Assist
 from bot import Auto
-from game_ui import Interface
+from destinations import CURRENT, Destination, Marker, Navigator, TravelSettings
+from game_ui import Interface, Point
 from hotkeys import Hotkeys
 from recorder import NS, Recorder, Status
 from tournament import Tournament
@@ -53,6 +54,12 @@ class App:
         self.background = tk.BooleanVar(master=root, value=False)
         self.agent = tk.BooleanVar(master=root, value=False)
         self.join_tournaments = tk.BooleanVar(master=root, value=False)
+        self.refill_bread = tk.BooleanVar(master=root, value=False)
+        self.rotate_ponds = tk.BooleanVar(master=root, value=False)
+        self.rotate_maps = tk.BooleanVar(master=root, value=False)
+        self.fishing_place = tk.StringVar(master=root, value=CURRENT)
+        self.places_folder = output_dir / "destinations"
+        self.places = Destination.load_all(self.places_folder) if autofish else []
         self.tournament_profile = output_dir / "tournament.npz"
         self.action_name = "AutoFish" if autofish else "asistenci" if assist else "záznam"
         self.title = "Fishao AutoFish" if autofish else "Fishao Asistence" if assist else "Fishao Záznamník"
@@ -171,6 +178,27 @@ class App:
         log_tab = ttk.Frame(tabs)
         tabs.add(preview_tab, text="Ladicí náhled")
         tabs.add(log_tab, text="Události")
+        if self.autofish:
+            places_tab = ttk.Frame(tabs, padding=16)
+            tabs.add(places_tab, text="Lovná místa")
+            ttk.Label(places_tab, text="Místo lovu").pack(anchor="w")
+            self.place_picker = ttk.Combobox(places_tab, state="readonly", textvariable=self.fishing_place,
+                                             values=[place.name for place in self.places], width=33)
+            self.place_picker.pack(anchor="w", pady=(4, 12))
+            self.travel_options = []
+            for label, variable in (
+                    ("Vyzvednout bezplatný chléb u Jamieho", self.refill_bread),
+                    ("Náhodně střídat uložené rybníky na stejné mapě", self.rotate_ponds),
+                    ("Náhodně střídat uložené mapy", self.rotate_maps)):
+                option = ttk.Checkbutton(places_tab, text=label, variable=variable)
+                option.pack(anchor="w", pady=3)
+                self.travel_options.append(option)
+            add = ttk.Button(places_tab, text="Přidat lovné místo…", command=self._add_place)
+            add.pack(anchor="w", pady=(12, 6))
+            self.travel_options.append(add)
+            ttk.Label(places_tab, wraplength=440, justify="left", style="Muted.TLabel",
+                      text="Pro střídání přidej alespoň dvě lovná místa. Změna se vyhodnocuje po 10 nahozeních. "
+                           "Při odpočtu v Trout Farm dostává přednost lov.").pack(anchor="w")
         self.canvas = tk.Canvas(preview_tab, bg="#1b232b", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
         self.canvas_message = self.canvas.create_text(
@@ -210,6 +238,62 @@ class App:
             return
         messagebox.showinfo("Nastavení turnajů", f"Ověřené vstupné: {fee} mincí.", parent=self.root)
 
+    def _pick_marker(self, title: str) -> Marker | None:
+        filename = filedialog.askopenfilename(parent=self.root, title=title,
+                                              filetypes=[("Snímky", "*.png *.jpg *.jpeg")])
+        if not filename:
+            return None
+        frame = Interface.normalize(Interface._image(Path(filename)))
+        thumbnail = cv2.resize(frame, (820, 442), interpolation=cv2.INTER_AREA)
+        pixels = cv2.cvtColor(thumbnail, cv2.COLOR_BGR2RGB)
+        popup = tk.Toplevel(self.root)
+        popup.title(title)
+        popup.transient(self.root)
+        picture = tk.PhotoImage(master=popup, data=b"P6\n820 442\n255\n" + pixels.tobytes(), format="ppm")
+        canvas = tk.Canvas(popup, width=820, height=442, highlightthickness=0)
+        canvas.pack()
+        canvas.create_image(0, 0, anchor="nw", image=picture)
+        point: Point | None = None
+
+        def select(event: tk.Event) -> None:
+            nonlocal point
+            point = (event.x / 820, event.y / 442)
+            popup.destroy()
+
+        canvas.bind("<Button-1>", select)
+        popup.grab_set()
+        self.root.wait_window(popup)
+        return Marker.capture(frame, point) if point is not None else None
+
+    def _add_place(self) -> None:
+        name = simpledialog.askstring("Lovné místo", "Název lovného místa", parent=self.root)
+        if not name or not name.strip():
+            return
+        name = name.strip()
+        if any(name.casefold() == place.name.casefold() for place in self.places):
+            messagebox.showerror("Lovné místo", "Tento název už existuje.", parent=self.root)
+            return
+        area = simpledialog.askstring("Lovné místo", "Název mapy (stejný pro rybníky na stejné mapě)",
+                                      parent=self.root)
+        if not area or not area.strip():
+            return
+        area = area.strip()
+        area = next((p.area for p in self.places if p.area.casefold() == area.casefold()), area)
+        try:
+            map_marker = self._pick_marker("Snímek otevřené mapy · klikni na vstup do oblasti")
+            if map_marker is None:
+                return
+            bank = self._pick_marker("Snímek po příchodu na mapu · klikni na výrazný bod na suchém břehu")
+            if bank is None:
+                return
+            Destination(name, area, map_marker, bank).save(self.places_folder)
+        except (OSError, ValueError, cv2.error) as exc:
+            messagebox.showerror("Lovné místo", str(exc), parent=self.root)
+            return
+        self.places = Destination.load_all(self.places_folder)
+        self.place_picker.configure(values=[place.name for place in self.places])
+        self.fishing_place.set(name)
+
     def _resize_preview(self, event: tk.Event) -> None:
         for item in (self.canvas_message, self.canvas_image):
             self.canvas.coords(item, event.width // 2, event.height // 2)
@@ -247,8 +331,10 @@ class App:
         self.stop_button.configure(text="Zastavit" if self.shortcut_warning else "Zastavit · F9",
                                    state="normal" if active and not stopping else "disabled")
         if self.autofish:
-            for option in (self.background_option, self.agent_option, self.tournament_option, self.tournament_setup):
+            for option in (self.background_option, self.agent_option, self.tournament_option,
+                           self.tournament_setup, *self.travel_options):
                 option.configure(state="disabled" if active else "normal")
+            self.place_picker.configure(state="disabled" if active else "readonly")
 
     def toggle(self) -> None:
         if self.closing:
@@ -268,8 +354,11 @@ class App:
             self.canvas.itemconfigure(self.canvas_image, image="")
             self.canvas.itemconfigure(self.canvas_message, state="normal")
             if self.autofish:
+                place = next(p for p in self.places if p.name == self.fishing_place.get())
+                travel = TravelSettings(place, tuple(self.places), self.refill_bread.get(),
+                                        self.rotate_ponds.get(), self.rotate_maps.get())
                 self.recorder = Auto(self.auto_casts, background=self.background.get(), agent=self.agent.get(),
-                                     tournament_profile=profile)
+                                     tournament_profile=profile, travel=travel)
             else:
                 self.recorder = Assist(self.cast_once) if self.assist else Recorder(
                     self.output_dir, self.fps, image_format=self.image_format)

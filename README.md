@@ -84,6 +84,10 @@ Před startem postav postavu u vody, zobraz kruh dosahu a ověř energii, prut a
 
 **Agent · přiblížení k vodě** může udělat krátký krok po souši, pokud vidí jednoznačný břeh. Po každém kroku počká, až se postava zastaví, a znovu hledá kruh. Volbu můžeš vypnout a postavu umístit ručně.
 
+Na kartě **Lovná místa** vyber aktuální místo, rybník u pekárny v Laketownu nebo vlastní uložený břeh. Při přidání místa použij snímky klientské plochy hry bez titulku a rámečku. Vyber značku oblasti na světové mapě a výrazný bod na suchém břehu, který je po příchodu do oblasti vidět. Pro rybníky ve stejné oblasti použij stejný název mapy. Aplikace po každých deseti potvrzených nahozeních zkusí vybrat jiné registrované místo podle zapnutých voleb. Pokud orientační bod není vidět, počká na jeho zobrazení.
+
+Volba **Vyzvednout bezplatný chléb u Jamieho** spouští cestu po vyčerpání návnady. U aktuálního místa aplikace potřebuje vidět dveře pekárny. U zvoleného lovného místa může použít mapu. Nabídku potvrdí až po rozpoznání Jamieho dialogu, počká na potvrzení přijetí návnady a v inventáři hledá ikonu chleba. Po doplnění se vrátí k vybranému břehu. Při aktivním odpočtu v Trout Farm zůstává v místě a použije zásoby z inventáře.
+
 **Účastnit se turnajů** je volitelné. Tlačítkem **Nastavit turnaje…** nejdřív vyber dva snímky samotného herního okna bez rámu a plochy. První zachyť s ikonou turnajů na běžné herní liště a druhý s otevřeným panelem a aktivní přihláškou. Aplikace kontroluje cenu v herních mincích a odešle přihlášku při shodě se zaznamenaným vstupným a dostatečném zůstatku.
 
 Hra a automat musí mít stejnou úroveň oprávnění Windows. Průchod AutoFish, minihra i přihlášení na základě referencí se testují simulací. Probíhající hod může skončit i bez úlovku. AutoFish se řídí stavem hry a při nejasném obraze vyčkává.
