@@ -232,7 +232,7 @@ class Auto(Assist):
                 message = "Potvrzuji novou úroveň"
             else:
                 assert image is not None
-                result = ui.result(image) if cycle.phase is not Phase.GEAR else None
+                result = ui.result(image) if cycle.phase is not Phase.GEAR and not (navigator and navigator.refill) else None
                 if result != observed_result:
                     observed_result, result_seen = result, 0
                 result_seen += 1

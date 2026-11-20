@@ -560,23 +560,85 @@ class AutoTest(unittest.TestCase):
         self.controls.click.assert_called_once_with(self.region, *target)
         self.assertEqual(nav.refill, "enter")
 
-    def test_refill_equips_bread_and_returns_to_water_after_leaving_bakery(self) -> None:
+    def test_bakery_approaches_jamie_then_equips_bread_only_back_at_water(self) -> None:
         place = Destination(CURRENT, "")
         nav = Navigator(TravelSettings(place, (place,)))
-        nav.refill = "exit"
-        no_bait = Hud(8, 40, 0, True, (.9, .5), (.9, .7))
+        hud = Hud(8, 40, 0, True, (.9, .5), (.9, .7))
         filled = Hud(8, 40, 75, True, (.9, .5), (.9, .7), bread=True)
+        counter, rug = (.5, .47), (.5, .83)
+        markers = {"bakery_inside": (.48, .2), "bakery_counter": counter, "bakery_exit": rug}
+        with (patch.object(nav, "match", side_effect=lambda _, key: markers.get(key)),
+              patch("destinations.avatar_feet", return_value=(.5, .75)) as feet,
+              patch("destinations.walking_direction", return_value="w"),
+              patch("destinations.shore_approach", return_value=None),
+              patch.object(nav, "_fishable", return_value=False) as fishable):
+            def tick(now, reading=hud, ready=True):
+                return nav.tick(self.frame, self.frame, reading, ready, 0, now, self.controls, self.region)
+
+            tick(1.)
+            tick(1.1)
+            self.controls.walk.assert_called_once_with(self.region.hwnd, "w", cancelled=ANY)
+            self.controls.click.assert_not_called()
+            feet.return_value = (.5, .53)
+            tick(2.)
+            tick(2.1)
+            self.controls.click.assert_called_once_with(self.region, .5, counter[1] - 65 / SIZE[1])
+            markers.update(jamie_offer=(.55, .28), jamie_yes=(.65, .26))
+            tick(4.2, ready=False)
+            tick(4.3, ready=False)
+            self.assertEqual(nav.refill, "receipt")
+
+            markers.clear()
+            markers["bakery_door"] = (.81, .85)
+            tick(5.8)
+            self.assertFalse(nav.wants_bread)
+            self.assertEqual(nav.refill, "receipt")
+            self.assertEqual(self.controls.click.call_count, 2)
+
+            markers.update(bakery_inside=(.48, .2), bakery_counter=counter, bakery_exit=rug, jamie_done=(.48, .25))
+            tick(6., ready=False)
+            tick(6.1, ready=False)
+            self.assertEqual(nav.refill, "dialog")
+            self.assertFalse(nav.wants_bread)
+            markers.pop("jamie_done")
+            tick(7.5)
+            tick(7.6)
+            self.assertEqual(nav.refill, "leaving")
+
+            markers.pop("bakery_inside")
+            markers.pop("bakery_exit")
+            tick(10.)
+            self.assertEqual(nav.refill, "return")
+            self.assertFalse(nav.wants_bread)
+            fishable.return_value = True
+            tick(11.)
+            self.assertEqual(nav.refill, "equip")
+            self.assertFalse(nav.wants_bread)
+            tick(11.1)
+            self.assertTrue(nav.wants_bread)
+            self.assertIsNone(tick(12., filled))
+            self.assertEqual(nav.refill, "")
+            self.assertFalse(nav.visit)
+
+        self.assertEqual(self.controls.click.call_args_list, [
+            call(self.region, .5, counter[1] - 65 / SIZE[1]),
+            call(self.region, .65, .26),
+            call(self.region, .5, counter[1] - 65 / SIZE[1]),
+            call(self.region, *rug),
+        ])
+
+    def test_laketown_can_resume_when_only_the_casting_circle_is_visible(self) -> None:
+        place = Destination(LAKETOWN, "Laketown")
+        nav = Navigator(TravelSettings(place, (place,)))
+        nav.arrived = True
+        hud = Hud(8, 40, 75, True, (.9, .5), (.9, .7), bread=True)
         with (patch.object(nav, "match", return_value=None),
               patch("destinations.shore_approach", return_value=None),
-              patch("destinations.casting_hover", return_value=(.41, .50))):
-            nav.tick(self.frame, self.frame, no_bait, True, 0, 1., self.controls, self.region)
-            self.assertEqual(nav.refill, "equip")
-            self.assertTrue(nav.wants_bread)
-            nav.tick(self.frame, self.frame, filled, True, 0, 2., self.controls, self.region)
-            self.assertEqual(nav.refill, "")
-            self.assertEqual(nav.destination.name, LAKETOWN)
-            self.assertIsNone(nav.tick(self.frame, self.frame, filled, True, 0, 3., self.controls, self.region))
-            self.assertFalse(nav.visit)
+              patch("destinations.casting_hover", return_value=None),
+              patch("destinations.casting_target", return_value=CastTarget((.4, .5), (.5, .5), .15, .54))):
+            self.assertIsNone(nav.tick(self.frame, self.frame, hud, True, 0, 1., self.controls, self.region))
+        self.assertFalse(nav.visit)
+        self.controls.click.assert_not_called()
 
     def test_jamie_needs_confirmed_offer_then_receipt(self) -> None:
         nav = Navigator(TravelSettings(Destination(CURRENT, ""), (), refill=True))
@@ -599,7 +661,8 @@ class AutoTest(unittest.TestCase):
             self.controls.click.assert_called_once_with(self.region, .65, .26)
             markers["jamie_reward"] = (.87, .15)
             tick(4.1)
-            self.assertEqual(nav.refill, "exit")
+            self.assertEqual(nav.refill, "dialog")
+            self.assertFalse(nav.wants_bread)
 
     def test_basic_rod_requires_matching_icon_without_red_badge(self) -> None:
         ui = Interface()
