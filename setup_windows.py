@@ -19,13 +19,13 @@ def create_shortcut(root: Path) -> Path:
     desktop = Path(shell.SpecialFolders("Desktop"))
     if not desktop.is_dir():
         raise RuntimeError("Plochu Windows se nepodařilo najít.")
-    path = desktop / "Fishao AutoFisher - obnova.lnk"
+    path = desktop / "Fishao AutoFisher.lnk"
     shortcut = shell.CreateShortcut(str(path))
     shortcut.TargetPath = str(pythonw)
     shortcut.Arguments = subprocess.list2cmdline([str(root / "main.py"), "--autofish"])
     shortcut.WorkingDirectory = str(root)
     shortcut.IconLocation = f"{icon},0"
-    shortcut.Description = "Fishao AutoFisher - obnova"
+    shortcut.Description = "Fishao AutoFisher"
     shortcut.Save()
     if not path.is_file():
         raise RuntimeError("Zástupce se nepodařilo uložit.")

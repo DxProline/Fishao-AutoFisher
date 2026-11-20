@@ -1,6 +1,6 @@
 # Fishao AutoFisher
 
-Tato rekonstrukce vychází z commitu `a94c4fd`. Obnovuje opravy nahození, čtení výbavy a sledování minihry. Rozhraní má opět světlé barvy, statistiky vedle náhledu a přepínač **Lovit v překrytém okně**. Původní plánování misí, nákup energie a registrace do turnajů v této rekonstrukci chybí.
+Vedle náhledu jsou živé statistiky a volby automatického lovu. Číslo verze je pod názvem aplikace.
 
 Z kořene projektu lze v CMD po instalaci 64bitového Pythonu 3.14 spustit:
 
@@ -59,9 +59,9 @@ Offline přehrávač analyzuje stabilitu scény, sledované oblasti, jejich posu
 & $python .\main.py --assist
 ```
 
-Spusť asistenci přes **F8** a ručně nahoď. Po rozpoznání lišty aplikace drží opačnou šipku podle vychýlení a rychlosti ukazatele. Uprostřed ji uvolní, pokud tam ukazatel zůstává. Jakmile lištu najde, snímá výřez kolem ní s cílem až 90 vzorků za sekundu. Skutečnou rychlost měří GUI. Ztratí-li lištu nebo fokus, uvolní vstup. **F8** je pauza, **F9** konec. Po zmizení lišty zkontroluj výsledek a zavři jej klávesou Esc.
+Spusť asistenci přes **F8** a ručně nahoď. Po rozpoznání lišty aplikace drží opačnou šipku podle vychýlení a rychlosti ukazatele. Uprostřed ji uvolní, pokud tam ukazatel zůstává. Jakmile lištu najde, snímá výřez kolem ní s cílem až 120 vzorků za sekundu. Skutečnou rychlost měří GUI. Ztratí-li lištu nebo fokus, uvolní vstup. **F8** je pauza, **F9** konec. Po zmizení lišty zkontroluj výsledek a zavři jej klávesou Esc.
 
-Ukazatel **Sledování sn./s** měří frekvenci úspěšného rozpoznání tečky. Náhled běží odděleně a aktualizuje se v minihře nejvýše 24krát za sekundu. Po ojedinělém výpadku rozpoznání zůstává snímání ve výřezu lišty, aby se tečka rychle znovu zachytila.
+Ukazatel **Sledování sn./s** měří frekvenci úspěšného rozpoznání tečky. Náhled se v minihře snaží obnovovat až 60krát za sekundu. Skutečná frekvence závisí na rychlosti hry, snímání a počítače. Po ojedinělém výpadku rozpoznání zůstává snímání ve výřezu lišty, aby se tečka rychle znovu zachytila.
 
 Volitelný režim jednoho zkušebního hodu:
 
@@ -82,6 +82,10 @@ Před startem postav postavu u vody, zobraz kruh dosahu a ověř energii, prut a
 3. AutoFish potvrdí hod z obrazu, vyčká na záběr, vyváží minihru a zavře rozpoznaný výsledek přes Esc. Pro další hod změří aktuální kruh dosahu kolem postavy s fialovou čepicí. Klikne jen do souvislé vody na straně od břehu, s odstupem od okraje kruhu. Střed, poloměr i bod musí potvrdit dva snímky. Při nejasném kruhu nebo břehu vyčká. Při nulové energii čeká na zvýšení čítače. Vyčerpanou výbavu zkusí doplnit.
 4. AutoFish běží do ručního vypnutí pomocí **F9**. Volitelný parametr `--max-casts 2` se hodí pro krátký test.
 
-Pohyb postavy k vodě zajišťuje hráč. Hra a automat musí mít stejnou úroveň oprávnění Windows. Rozpoznávání bylo ověřené na skutečných snímcích úlovku, úniku a inventáře. Průchod AutoFish a rychlé změny směru byly testované simulací. Celý automatický průchod ve hře je třeba ověřit prvním hlídaným spuštěním. Probíhající hod může skončit i bez úlovku. AutoFish se řídí stavem hry a při nejasném obraze vyčkává.
+**Agent · přiblížení k vodě** může udělat krátký krok po souši, pokud vidí jednoznačný břeh. Po každém kroku počká, až se postava zastaví, a znovu hledá kruh. Volbu můžeš vypnout a postavu umístit ručně.
+
+**Účastnit se turnajů** je volitelné. Tlačítkem **Nastavit turnaje…** nejdřív vyber dva snímky samotného herního okna bez rámu a plochy. První zachyť s ikonou turnajů na běžné herní liště a druhý s otevřeným panelem a aktivní přihláškou. Aplikace kontroluje cenu v herních mincích a odešle přihlášku při shodě se zaznamenaným vstupným a dostatečném zůstatku.
+
+Hra a automat musí mít stejnou úroveň oprávnění Windows. Průchod AutoFish, minihra i přihlášení na základě referencí se testují simulací. Probíhající hod může skončit i bez úlovku. AutoFish se řídí stavem hry a při nejasném obraze vyčkává.
 
 Testy balíčku spusť příkazem `& $python -B -m unittest -v`.

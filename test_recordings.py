@@ -16,7 +16,7 @@ from minigame import BalanceDetector, BalancePolicy
 from recorded import Recording
 from recorder import Recorder
 from replay import replay
-from spots import casting_hover, casting_spot, casting_target
+from spots import casting_hover, casting_spot, casting_target, shore_approach
 from vision import VisualDetector
 from window import Region
 
@@ -173,6 +173,16 @@ class RecordedWorkflow(unittest.TestCase):
         x, y = round(target.point[0] * width), round(target.point[1] * height)
         self.assertTrue(water[y, x])
         self.assertAlmostEqual(target.radius * width, 356, delta=4)
+
+    def test_agent_selects_dry_ground_between_avatar_and_shore(self) -> None:
+        image = np.full((485, 900, 3), (16, 160, 78), np.uint8)
+        image[:, 550:] = (216, 135, 8)
+        self.assertIsNone(shore_approach(image))
+        cv2.circle(image, (450, 240), 11, (158, 37, 97), -1)
+        point = shore_approach(image)
+        self.assertIsNotNone(point)
+        self.assertLess(450, point[0] * 900)
+        self.assertLess(point[0] * 900, 550)
 
     def test_pier_uses_only_the_nearest_side_of_the_water(self) -> None:
         scene = np.full((550, 760, 3), (207, 134, 20), np.uint8)

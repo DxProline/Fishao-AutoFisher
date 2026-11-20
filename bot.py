@@ -2,14 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from time import perf_counter
 
-from assist import TARGET_HZ, TRACK_MISSES, Assist
+from assist import PREVIEW_HZ, TARGET_HZ, TRACK_MISSES, Assist
 from controls import BackgroundControls, Controls
 from game_ui import Hud, Interface, Inventory, Point
 from minigame import BalanceDetector, BalancePolicy, PixelBox
 from recorder import NS
-from spots import CastTarget, casting_hover, casting_target
+from spots import CastTarget, casting_hover, casting_target, shore_approach
+from tournament import Tournament
 from window import FrameUnavailable, Image, Region, WindowCapture
 
 
@@ -48,6 +50,9 @@ class Cycle:
     select_attempts: int = 0
     original_energy: int | None = None
     saw_waiting_hud: bool = False
+    shore_step: Point | None = None
+    shore_moves: int = 0
+    next_step: float = 0.
 
     def advance(self, phase: Phase, now: float, *, progress: bool = True) -> None:
         if self.phase != phase:
@@ -73,9 +78,12 @@ class Cycle:
 class Auto(Assist):
     """Opakování ověřených akcí nad obrazem hry, v samostatném vlákně."""
 
-    def __init__(self, max_casts: int | None = None, *, background: bool = False) -> None:
+    def __init__(self, max_casts: int | None = None, *, background: bool = False,
+                 agent: bool = False, tournament_profile: Path | None = None) -> None:
         super().__init__(background=background)
         self.max_casts = max_casts
+        self.agent = agent
+        self.tournament_profile = tournament_profile
         self.name = "AutoFish"
 
     def _limit_reached(self, cycle: Cycle) -> bool:
@@ -83,6 +91,7 @@ class Auto(Assist):
 
     def _loop(self, capture: WindowCapture, controls: Controls) -> str:
         ui, detector, policy = Interface(), BalanceDetector(), BalancePolicy()
+        tournament = Tournament(ui, self.tournament_profile) if self.tournament_profile else None
         cycle = Cycle()
         crop: PixelBox | None = None
         expected: tuple[int,int] | None = None
@@ -98,10 +107,13 @@ class Auto(Assist):
         while not self.stopping:
             tick = perf_counter()
             if self.paused:
+                if tournament is not None:
+                    tournament.previous = None
                 controls.release()
                 policy.choose(None)
                 self._tracking_times.clear()
                 cycle.candidate = None
+                cycle.shore_step = None
                 agreement, repetitions = None, 0
                 last_tick = None
                 self._update(text="Pozastaveno. Pokračuj přes F8.", tracking_fps=None)
@@ -110,10 +122,13 @@ class Auto(Assist):
             try:
                 frame, region = capture.grab(crop, expected=expected if crop else None)
             except FrameUnavailable as exc:
+                if tournament is not None:
+                    tournament.previous = None
                 controls.release()
                 policy.choose(None)
                 self._tracking_times.clear()
                 cycle.candidate = None
+                cycle.shore_step = None
                 agreement, repetitions = None, 0
                 crop = None
                 crop_misses = 0
@@ -181,6 +196,7 @@ class Auto(Assist):
                 stable = key is not None and repetitions >= 2
                 if key is None or (cycle.candidate is not None and not stable):
                     cycle.candidate = None
+                    cycle.shore_step = None
                 if self.stopping or self.paused:
                     continue
                 if cycle.phase is Phase.GEAR:
@@ -207,6 +223,7 @@ class Auto(Assist):
                         cycle.saw_waiting_hud = not hud.ready
                         cycle.advance(Phase.WAIT,active)
                         cycle.casts += 1
+                        cycle.shore_moves = 0
                         self._log.info("Nahození potvrzeno. Pokusy: %s.", cycle.casts)
                     elif stable and active - cycle.since >= CAST_ACK_S:
                         cycle.retries += 1
@@ -223,17 +240,25 @@ class Auto(Assist):
                         if self._limit_reached(cycle):
                             return "Dosažen zvolený limit nahození. Hotovo."
                         cycle.advance(Phase.READY,active)
-                if cycle.phase in (Phase.READY,Phase.ENERGY) and stable and hud:
+                activity = None
+                if (tournament is not None and cycle.phase in (Phase.READY, Phase.ENERGY)
+                        and not inventory and not result):
+                    activity = tournament.tick(image, stable, active, controls, region)
+                if not activity and cycle.phase in (Phase.READY,Phase.ENERGY) and stable and hud:
                     self._ready(cycle,hud,frame,active,controls,region)
                 message = cycle.phase.value
                 if hud and cycle.phase in (Phase.READY, Phase.ENERGY, Phase.WAIT):
                     message += f" · energie {hud.energy if hud.energy is not None else '?'}"
                 if cycle.phase is Phase.READY and cycle.candidate is None and active < cycle.next_hover:
                     message += " · čekám na kruh dosahu nad vodou"
+                if cycle.phase is Phase.READY and active < cycle.next_step:
+                    message = "Přicházím k vodě. Čekám na zastavení postavy."
                 if cycle.phase is Phase.GEAR and cycle.gear_step == "unavailable":
                     message = "Čekám na dostupný prut nebo návnadu."
+                if activity:
+                    message = activity
             if active >= next_preview:
-                next_preview = active + (1/24 if selected_crop else .12)
+                next_preview = active + (1 / PREVIEW_HZ if selected_crop else .12)
                 preview = frame.copy() if balance else frame
                 if balance:
                     self._annotate(preview,balance,selected_crop)
@@ -242,7 +267,7 @@ class Auto(Assist):
                 message = controls.problem
             self._update(text=message,casts=cycle.casts,caught=cycle.caught,escaped=cycle.escaped,
                          active_ns=round(active*NS), tracking_fps=tracking_fps)
-            interval = 1/TARGET_HZ if crop else .06
+            interval = 1 / TARGET_HZ if crop else .025 if cycle.phase in (Phase.CAST, Phase.WAIT) else .06
             self._stop_requested.wait(max(0., interval-(perf_counter()-tick)))
         return "AutoFish vypnutý. Šipky uvolněné."
 
@@ -267,10 +292,24 @@ class Auto(Assist):
                     cycle.next_action = now + .7
                     cycle.advance(Phase.GEAR,now)
                 return None
+        if now < cycle.next_step:
+            return None
         if now >= cycle.next_scan:
             preferred = cycle.candidate.point if cycle.candidate else cycle.preferred()
             target = casting_target(frame,preferred,avoid=cycle.position)
             cycle.next_scan = now if target is not None else now + .2
+            if target is None and self.agent and cycle.shore_moves < 5 and not self.stopping and not self.paused:
+                step = shore_approach(frame)
+                previous, cycle.shore_step = cycle.shore_step, step
+                if step and previous and max(abs(a - b) for a, b in zip(step, previous)) <= .012:
+                    if controls.click(region, *step):
+                        cycle.shore_step = None
+                        cycle.shore_moves += 1
+                        cycle.next_step = now + 1.15
+                        self._log.info("Přesun k břehu před měřením dosahu prutu.")
+                        return None
+            else:
+                cycle.shore_step = None
             if target is None and now >= cycle.next_hover and not self.stopping and not self.paused:
                 point = casting_hover(frame)
                 if point is not None:

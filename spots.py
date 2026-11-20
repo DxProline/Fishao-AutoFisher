@@ -118,6 +118,54 @@ def _avatars(hsv: Image) -> list[tuple[float, float, int, int]]:
     return avatars
 
 
+def _shore_avatars(hsv: Image) -> list[tuple[float, float, int, int]]:
+    avatars = _avatars(hsv)
+    if len(avatars) <= 1:
+        return avatars
+    height, width = hsv.shape[:2]
+    central = [a for a in avatars if .32 * width <= a[0] <= .68 * width
+               and .25 * height <= a[1] <= .72 * height and a[3] >= .032 * height]
+    return central or avatars
+
+
+def shore_approach(image: Image) -> Point | None:
+    """Krátký krok po souši, pokud je jedna postava a voda v dosažitelné blízkosti."""
+    frame = _scene(image)
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    height, width = hsv.shape[:2]
+    avatars = _shore_avatars(hsv)
+    if len(avatars) != 1:
+        return None
+    x, y, _, hat = avatars[0]
+    feet = np.array((x, y + 1.25 * hat))
+    yy, xx = np.ogrid[:height, :width]
+    world = ((xx >= .06 * width) & (xx < .90 * width) & (yy >= .10 * height)
+             & (yy < .85 * height))
+    water = _open_water(hsv) & world
+    depth = cv2.distanceTransform(water.astype(np.uint8), cv2.DIST_L2, 3)
+    squared = (xx - feet[0]) ** 2 + (yy - feet[1]) ** 2
+    if not (depth >= 4).any():
+        return None
+    row, col = np.unravel_index(np.where(depth >= 4, squared, np.inf).argmin(), depth.shape)
+    distance = float(np.hypot(col - feet[0], row - feet[1]))
+    if not .85 * hat < distance <= 12 * hat:
+        return None
+    path = np.rint(np.linspace(feet, (col, row), max(2, round(distance)))).astype(int)
+    if not ((0 <= path[:, 0]).all() and (path[:, 0] < width).all()
+            and (0 <= path[:, 1]).all() and (path[:, 1] < height).all()):
+        return None
+    wet = np.flatnonzero(water[path[:, 1], path[:, 0]])
+    if not wet.size:
+        return None
+    step = min(round(4 * hat), int(wet[0]) - max(3, round(hat * .20)))
+    if step < .65 * hat:
+        return None
+    sx, sy = path[step]
+    if not world[sy, sx] or water[sy-2:sy+3, sx-2:sx+3].any():
+        return None
+    return int(sx) / width, int(sy) / height
+
+
 def casting_hover(image: Image) -> Point | None:
     """Najde vodu u postavy pro najetí kurzorem, samostatně nepotvrzuje hod."""
     frame = _scene(image)

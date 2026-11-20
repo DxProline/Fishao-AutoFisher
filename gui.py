@@ -7,14 +7,16 @@ import tkinter as tk
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from queue import Empty, SimpleQueue
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 import cv2
 
 from assist import Assist
 from bot import Auto
+from game_ui import Interface
 from hotkeys import Hotkeys
 from recorder import NS, Recorder, Status
+from tournament import Tournament
 from version import VERSION
 from window import Image
 
@@ -48,6 +50,9 @@ class App:
         self.auto_casts = auto_casts
         self.autofish = autofish
         self.background = tk.BooleanVar(master=root, value=False)
+        self.agent = tk.BooleanVar(master=root, value=False)
+        self.join_tournaments = tk.BooleanVar(master=root, value=False)
+        self.tournament_profile = output_dir / "tournament.npz"
         self.action_name = "AutoFish" if autofish else "asistenci" if assist else "záznam"
         self.title = "Fishao AutoFish" if autofish else "Fishao Asistence" if assist else "Fishao Záznamník"
         self.closing = False
@@ -64,12 +69,12 @@ class App:
         self._build()
         self.hotkeys.start()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
-        self.root.after(33, self._poll)
+        self.root.after(16, self._poll)
 
     def _log_setup(self) -> tuple[logging.Handler, logging.Handler]:
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        logs = self.output_dir / "logs"
-        logs.mkdir(exist_ok=True)
+        logs = self.output_dir / "runtime" / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
         self.log = logging.getLogger("fishao")
         self.log.setLevel(logging.INFO)
         self.log.propagate = False
@@ -82,7 +87,7 @@ class App:
         return disk, view
 
     def _build(self) -> None:
-        self.root.title(f"{self.title} {VERSION}")
+        self.root.title(self.title)
         self.root.geometry("1040x680")
         self.root.minsize(760, 480)
         self.root.configure(bg=BG)
@@ -112,7 +117,7 @@ class App:
         heading = ttk.Frame(bar)
         heading.pack(side="left", padx=(0, 14))
         ttk.Label(heading, text=self.title, style="Hero.TLabel").pack(anchor="w")
-        ttk.Label(heading, text=f"Verze {VERSION}", style="Muted.TLabel").pack(anchor="w")
+        ttk.Label(heading, text=VERSION, style="Muted.TLabel").pack(anchor="w")
         self.toggle_button = ttk.Button(bar, command=self.toggle, style="Start.TButton")
         self.toggle_button.pack(side="left", padx=(0, 8))
         self.stop_button = ttk.Button(bar, text="Zastavit · F9", command=self.stop)
@@ -133,7 +138,15 @@ class App:
             self.background_option = ttk.Checkbutton(sidebar, text="Lovit v překrytém okně",
                                                       variable=self.background, style="Fishing.TCheckbutton",
                                                       command=self._update_preview_hint)
-            self.background_option.pack(anchor="w", pady=(0, 12))
+            self.background_option.pack(anchor="w", pady=(0, 4))
+            self.agent_option = ttk.Checkbutton(sidebar, text="Agent · přiblížení k vodě",
+                                                 variable=self.agent, style="Fishing.TCheckbutton")
+            self.agent_option.pack(anchor="w", pady=(0, 4))
+            self.tournament_option = ttk.Checkbutton(sidebar, text="Účastnit se turnajů",
+                                                      variable=self.join_tournaments, style="Fishing.TCheckbutton")
+            self.tournament_option.pack(anchor="w", pady=(0, 4))
+            self.tournament_setup = ttk.Button(sidebar, text="Nastavit turnaje…", command=self._setup_tournament)
+            self.tournament_setup.pack(anchor="w", pady=(0, 12))
             ttk.Separator(sidebar).pack(fill="x", pady=(0, 10))
         ttk.Label(sidebar, text="Statistiky", style="Metric.TLabel").pack(anchor="w", pady=(0, 8))
         self.metrics: dict[str, tk.StringVar] = {}
@@ -180,6 +193,21 @@ class App:
         hint = "nech hru otevřenou" if self.background.get() else "přepni do hry"
         self.canvas.itemconfigure(self.canvas_message, text=f"Spusť {self.action_name} a {hint}.")
 
+    def _setup_tournament(self) -> None:
+        paths = []
+        for title in ("Snímek celého okna hry s ikonou turnaje", "Snímek okna s aktivní přihláškou do turnaje"):
+            name = filedialog.askopenfilename(parent=self.root, title=title,
+                                              filetypes=[("Snímky", "*.png *.jpg *.jpeg")])
+            if not name:
+                return
+            paths.append(Path(name))
+        try:
+            fee = Tournament.calibrate(self.tournament_profile, *[Interface._image(p) for p in paths])
+        except (OSError, ValueError, cv2.error) as exc:
+            messagebox.showerror("Nastavení turnajů", str(exc), parent=self.root)
+            return
+        messagebox.showinfo("Nastavení turnajů", f"Ověřené vstupné: {fee} mincí.", parent=self.root)
+
     def _resize_preview(self, event: tk.Event) -> None:
         for item in (self.canvas_message, self.canvas_image):
             self.canvas.coords(item, event.width // 2, event.height // 2)
@@ -214,7 +242,8 @@ class App:
         self.stop_button.configure(text="Zastavit" if self.shortcut_warning else "Zastavit · F9",
                                    state="normal" if active and not stopping else "disabled")
         if self.autofish:
-            self.background_option.configure(state="disabled" if active else "normal")
+            for option in (self.background_option, self.agent_option, self.tournament_option, self.tournament_setup):
+                option.configure(state="disabled" if active else "normal")
 
     def toggle(self) -> None:
         if self.closing:
@@ -222,13 +251,19 @@ class App:
         if self.recorder is not None and not self.recorder.snapshot().finished:
             self.recorder.toggle_pause()
         else:
+            profile = self.tournament_profile if self.autofish and self.join_tournaments.get() else None
+            if profile is not None and not profile.is_file():
+                messagebox.showinfo("Turnaje", "Nejprve otevři Nastavit turnaje a vyber referenční snímky.",
+                                    parent=self.root)
+                return
             self.preview_index = -1
             self.preview_photo = None
             self.preview_frame = None
             self.canvas.itemconfigure(self.canvas_image, image="")
             self.canvas.itemconfigure(self.canvas_message, state="normal")
             if self.autofish:
-                self.recorder = Auto(self.auto_casts, background=self.background.get())
+                self.recorder = Auto(self.auto_casts, background=self.background.get(), agent=self.agent.get(),
+                                     tournament_profile=profile)
             else:
                 self.recorder = Assist(self.cast_once) if self.assist else Recorder(
                     self.output_dir, self.fps, image_format=self.image_format)
@@ -325,7 +360,7 @@ class App:
                 handler.close()
             self.root.destroy()
         else:
-            self.root.after(33, self._poll)
+            self.root.after(16, self._poll)
 
     def close(self) -> None:
         self.closing = True

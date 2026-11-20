@@ -17,7 +17,8 @@ from window import FrameUnavailable, Image, WindowCapture
 WAIT_BITE_S = 120.0
 BALANCE_LIMIT_S = 120.0
 FIND_SPOT_S = 20.0
-TARGET_HZ = 90
+TARGET_HZ = 120
+PREVIEW_HZ = 60
 TRACK_MISSES = 4
 
 
@@ -192,7 +193,7 @@ class Assist(threading.Thread):
             else:
                 status = "Čekám na lištu minihry. Nahoď ručně."
             if now >= next_preview:
-                next_preview = now + (1/24 if entry_box else .12)
+                next_preview = now + (1 / PREVIEW_HZ if entry_box else .12)
                 shown = frame.copy() if reading else frame
                 if reading:
                     self._annotate(shown, reading, entry_box)

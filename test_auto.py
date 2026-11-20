@@ -13,6 +13,7 @@ from controls import BackgroundControls, Controls
 from game_ui import Hud, Interface, Inventory, SIZE
 from minigame import Balance, BalancePolicy
 from spots import CastTarget
+from tournament import BOXES, Tournament
 from window import FrameUnavailable, Region, WindowCapture
 
 
@@ -83,6 +84,59 @@ class AutoTest(unittest.TestCase):
             with self.assertRaises(FrameUnavailable):
                 capture.grab((4, 2, 3, 4), expected=(9, 6))
             frame.assert_called_once_with(region)
+
+    def test_agent_steps_towards_water_only_after_two_confirmations(self) -> None:
+        position = (.45, .51)
+        hud = Hud(4, 12, 20, True, position, position)
+        with (patch("bot.casting_target", return_value=None), patch("bot.casting_hover", return_value=None),
+              patch("bot.shore_approach", return_value=position) as approach):
+            self.auto._ready(self.cycle, hud, self.frame, 1., self.controls, self.region)
+            approach.assert_not_called()
+            agent = Auto(agent=True)
+            agent._ready(self.cycle, hud, self.frame, 2., self.controls, self.region)
+            self.controls.click.assert_not_called()
+            agent._ready(self.cycle, hud, self.frame, 3., self.controls, self.region)
+            agent._ready(self.cycle, hud, self.frame, 3.5, self.controls, self.region)
+            self.controls.click.assert_called_once_with(self.region, *position)
+            self.controls.cast.assert_not_called()
+
+    def test_tournament_validates_price_and_requires_two_frames(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        random = np.random.default_rng(1)
+        hud, panel = self.frame.copy(), self.frame.copy()
+        tiles = {}
+        for key, (x, y, r, b) in BOXES.items():
+            tile = random.integers(0, 256, size=(b-y,r-x,3), dtype=np.uint8)
+            tiles[key] = tile
+            if key == "icon":
+                hud[y:b, x:r] = tile
+            if key != "icon":
+                panel[y:b, x:r] = tile
+        ui = Mock()
+        ui.number.side_effect = lambda _, white: 5 if white else 20
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "profile.npz"
+            np.savez_compressed(path, fee=np.int64(5), **tiles)
+            tournament = Tournament(ui, path)
+            with patch("tournament._signup_active", return_value=True):
+                tournament.tick(hud, True, 31., self.controls, self.region)
+                self.controls.click.assert_not_called()
+                tournament.tick(hud, True, 32., self.controls, self.region)
+                self.assertEqual(self.controls.click.call_count, 1)
+                tournament.tick(panel, False, 33., self.controls, self.region)
+                self.assertEqual(self.controls.click.call_count, 1)
+                self.assertEqual(tournament.tick(panel, False, 33.5, self.controls, self.region), "Přihlašuji turnaj.")
+                self.assertEqual(self.controls.click.call_count, 2)
+                self.assertEqual(tournament.last_signup, 33.5)
+                self.assertIsNone(tournament.tick(panel, False, 34., self.controls, self.region))
+
+                tournament = Tournament(ui, path)
+                ui.number.side_effect = lambda _, white: 6 if white else 20
+                tournament.tick(panel, False, 40., self.controls, self.region)
+                self.assertEqual(tournament.tick(panel, False, 41., self.controls, self.region), "Zavírám turnaje.")
+                self.assertEqual(tournament.last_signup, -600.)
 
     def test_covered_input_releases_message_key_before_native_key(self) -> None:
         def init(controls):

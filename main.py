@@ -32,12 +32,16 @@ def main() -> None:
         ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
     except AttributeError:
         ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("DxProline.FishaoAutoFish")
 
     import tkinter as tk
     from tkinter import messagebox
 
     root = tk.Tk()
     try:
+        icon = Path(__file__).resolve().parent / "assets" / "Tkinter.ico"
+        if icon.is_file():
+            root.iconbitmap(default=str(icon))
         from gui import App
 
         App(root, args.output_dir.resolve(), args.fps, assist=args.assist, cast_once=args.test_cast,
