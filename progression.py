@@ -40,7 +40,8 @@ class Progression:
         self.previous = None
 
     def tick(self, image: Image, *, ready: bool, now: float, controls: Controls, region: Region,
-             missing: str | None, casts: int, caught: int, escaped: int, rare_mission: bool) -> str | None:
+             missing: str | None, casts: int, caught: int, escaped: int, rare_mission: bool,
+             allow_farm: bool = True) -> str | None:
         find = self.ui._find
         if self.goal is None:
             if not ready:
@@ -51,7 +52,7 @@ class Progression:
             elif not self.line_tried and escaped >= 8 and escaped > caught:
                 self.goal = "line"
                 self.line_tried = True
-            elif not self.farm_tried and (casts >= 18 or rare_mission and casts >= 8) and caught * 3 < casts:
+            elif allow_farm and not self.farm_tried and (casts >= 18 or rare_mission and casts >= 8) and caught * 3 < casts:
                 self.goal = "farm"
                 self.farm_tried = True
             else:

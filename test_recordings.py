@@ -268,6 +268,31 @@ class RecordedWorkflow(unittest.TestCase):
         cv2.ellipse(scene, (305, 165), (15, 14), 0, 0, 360, (170, 50, 105), -1)
         self.assertIsNone(shore_approach(scene))
 
+    def test_olive_pond_requires_casting_rim_and_rejects_textured_ground(self) -> None:
+        height, width = 485, 900
+        pond_end = 235
+        center, radius = (450, 240), 147
+        hsv = np.full((height, width, 3), (41, 248, 167), np.uint8)
+        hsv[:pond_end, 240:675] = (28, 150, 130)
+        # Pruh stejného odstínu na souši bez jednolitého povrchu.
+        hsv[300:, :, :2] = (28, 150)
+        hsv[300:, ::2, 2] = 109
+        hsv[300:, 1::2, 2] = 171
+        hsv[:, :120] = hsv[:, 795:] = 0
+        scene = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+        cv2.ellipse(scene, (450, 212), (14, 13), 0, 0, 360, (170, 50, 105), -1)
+        wet = casting_hover(scene)
+        self.assertIsNotNone(wet)
+        self.assertLess(wet[1] * height, pond_end)
+        with patch("spots._circles", return_value=[(.8, *center, radius)]):
+            self.assertIsNone(casting_target(scene))
+        cv2.circle(scene, center, radius, (88, 167, 170), 3, cv2.LINE_AA)
+        target = casting_target(scene, preferred=(.50, .76))
+        self.assertIsNotNone(target)
+        x, y = target.point[0] * width, target.point[1] * height
+        self.assertLess(y, pond_end)
+        self.assertLess(np.hypot(x - center[0], y - center[1]), radius)
+
     def test_paid_farm_water_requires_fenced_layout(self) -> None:
         hsv = np.full((681, 1264, 3), (54, 211, 160), np.uint8)
         hsv[:, :150, :] = hsv[:, 1104:, :] = 0

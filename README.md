@@ -1,5 +1,15 @@
 # Fishao AutoFisher
 
+Vedle náhledu jsou živé statistiky a volby automatického lovu. Číslo verze je pod názvem aplikace.
+
+Z kořene projektu lze v CMD po instalaci 64bitového Pythonu 3.14 spustit:
+
+```bat
+py -3.14 setup_windows.py
+```
+
+Skript spravuje místní prostředí `.venv` a vytvoří zástupce s ikonkou Tkinteru. Režim překrytého okna vyžaduje, aby Windows a hra poskytly obraz a přijaly vstup do okna. Při chybě režim vypni a ponech hru v popředí.
+
 Windows 11, 64bitový CPython 3.14. Balíček obsahuje záznamník, offline přehrávač, asistenci a automat opakovaného lovu z připraveného místa u vody.
 
 ## 1. Záznamník
@@ -49,9 +59,9 @@ Offline přehrávač analyzuje stabilitu scény, sledované oblasti, jejich posu
 & $python .\main.py --assist
 ```
 
-Spusť asistenci přes **F8** a ručně nahoď. Po rozpoznání lišty aplikace drží opačnou šipku podle vychýlení a rychlosti ukazatele. Uprostřed ji uvolní, pokud tam ukazatel zůstává. Jakmile lištu najde, snímá výřez kolem ní s cílem až 90 vzorků za sekundu. Skutečnou rychlost měří GUI. Ztratí-li lištu nebo fokus, uvolní vstup. **F8** je pauza, **F9** konec. Po zmizení lišty zkontroluj výsledek a zavři jej klávesou Esc.
+Spusť asistenci přes **F8** a ručně nahoď. Po rozpoznání lišty aplikace drží opačnou šipku podle vychýlení a rychlosti ukazatele. Uprostřed ji uvolní, pokud tam ukazatel zůstává. Jakmile lištu najde, snímá výřez kolem ní s cílem až 120 vzorků za sekundu. Skutečnou rychlost měří GUI. Ztratí-li lištu nebo fokus, uvolní vstup. **F8** je pauza, **F9** konec. Po zmizení lišty zkontroluj výsledek a zavři jej klávesou Esc.
 
-Ukazatel **Sledování sn./s** měří frekvenci úspěšného rozpoznání tečky. Náhled běží odděleně a aktualizuje se v minihře nejvýše 24krát za sekundu. Po ojedinělém výpadku rozpoznání zůstává snímání ve výřezu lišty, aby se tečka rychle znovu zachytila.
+Ukazatel **Detekce sn./s** měří frekvenci úspěšného rozpoznání tečky. **Náhled sn./s** uvádí rychlost aktualizace obrázku v aplikaci s cílem 60 sn./s během minihry. Skutečná frekvence závisí na rychlosti hry, snímání a počítače. Po ojedinělém výpadku rozpoznání zůstává snímání ve výřezu lišty, aby se tečka rychle znovu zachytila.
 
 Volitelný režim jednoho zkušebního hodu:
 
@@ -59,7 +69,7 @@ Volitelný režim jednoho zkušebního hodu:
 & $python .\main.py --assist --test-cast
 ```
 
-Před startem postav postavu u vody, zobraz kruh dosahu a ověř energii, prut a návnadu. Aplikace zkusí jeden klik, pokud na dvou snímcích najde podobný bod ve vodě uvnitř kruhu. Pro hledání bodu, čekání na záběr a minihru má oddělené limity. Po jednom pokusu se relace ukončí.
+Před startem postav postavu u vody, zobraz kruh dosahu a ověř energii, prut a návnadu. Aplikace zkusí jeden hod dvěma rychlými kliky, pokud na dvou snímcích najde podobný bod ve vodě uvnitř kruhu. Pro hledání bodu, čekání na záběr a minihru má oddělené limity. Po jednom pokusu se relace ukončí.
 
 ## 4. AutoFish
 
@@ -88,7 +98,7 @@ Na rozpoznané placené Trout Farm agent upřednostňuje rybaření. Při nulov�
 & $python .\main.py --agent
 ```
 
-Před spuštěním lovu zapni **Mise, postup a vybavení**. Příkaz `--agent` tuto volbu předvybere. Po sérii málo úspěšných hodů umí zkusit přechod na Trout Farm. Rozpoznaná mise na čtyřhvězdičkovou rybu zkracuje dobu před porovnáním výsledků na stávajícím místě. Při chybějícím prutu nebo návnadě nejdřív projde inventář a teprve potom hledá ověřenou nabídku v obchodě. Porovnává ceny prutů a drží rezervu 30 bankovek. Při opakovaném úniku ryb prověří vlasec a po případném upgradu ponechá rezervu 5 mincí.
+Před spuštěním lovu zapni **Mise, postup a vybavení**. Příkaz `--agent` tuto volbu předvybere. Po sérii málo úspěšných hodů umí v režimu aktuálního místa bez střídání zkusit přechod na Trout Farm. Rozpoznaná mise na čtyřhvězdičkovou rybu zkracuje dobu před porovnáním výsledků na stávajícím místě. Při chybějícím prutu nebo návnadě nejdřív projde inventář a teprve potom hledá ověřenou nabídku v obchodě. Porovnává ceny prutů a drží rezervu 30 bankovek. Při opakovaném úniku ryb prověří vlasec a po případném upgradu ponechá rezervu 5 mincí.
 
 Volba **Účastnit se turnajů** je při otevření aplikace vypnutá. Zaškrtni ji před spuštěním lovu, pokud chceš turnaje vyhledávat a hlásit se za herní mince. Agent turnaje kontroluje nejvýše jednou za pět minut. Při neověřené registraci zavře panel a vrátí se k lovu. Pro změnu volby během lovu zastav agenta klávesou F9 a po změně ho znovu spusť.
 
@@ -102,6 +112,12 @@ Agent pracuje s ověřenými obrazovkami hry. Další typy misí, samostatné ob
 
 Před spuštěním zaškrtni **Lovit v překrytém okně**. Fishao nech otevřené a překryj jej prohlížečem nebo jiným oknem. Tento režim snímá klientskou plochu Fishao a předává kliknutí a šipky přímo hře. Skutečná myš zůstává volná. Při minimalizaci Fishao automat počká na obnovení okna. Režim závisí na tom, zda spuštěná hra přijímá zprávy o vstupu na pozadí. Pokud přímý vstup selže, můžeš po zastavení zvolit běžný režim.
 
-Pohyb postavy k vodě zajišťuje hráč. Hra a automat musí mít stejnou úroveň oprávnění Windows. Rozpoznávání bylo ověřené na skutečných snímcích úlovku, úniku a inventáře. Průchod AutoFish a rychlé změny směru byly testované simulací. Celý automatický průchod ve hře je třeba ověřit prvním hlídaným spuštěním. Probíhající hod může skončit i bez úlovku. AutoFish se řídí stavem hry a při nejasném obraze vyčkává.
+Na kartě **Lovná místa** vyber aktuální místo, rybník u pekárny v Laketownu nebo vlastní uložený břeh. Při přidání místa použij snímky klientské plochy hry bez titulku a rámečku. Vyber značku oblasti na světové mapě a výrazný bod na suchém břehu, který je po příchodu do oblasti vidět. Pro rybníky ve stejné oblasti použij stejný název mapy. Aplikace po každých deseti potvrzených nahozeních zkusí vybrat jiné registrované místo podle zapnutých voleb. Pokud orientační bod není vidět, počká na jeho zobrazení.
+
+Volba **Vyzvednout bezplatný chléb u Jamieho** spouští cestu po vyčerpání návnady. U aktuálního místa aplikace potřebuje vidět dveře pekárny. U zvoleného lovného místa může použít mapu. Nabídku potvrdí až po rozpoznání Jamieho dialogu, počká na potvrzení přijetí návnady a v inventáři hledá ikonu chleba. Po doplnění se vrátí k vybranému břehu. Při aktivním odpočtu v Trout Farm zůstává v místě a použije zásoby z inventáře.
+
+Tlačítkem **Vlastní profil turnajů…** můžeš nahradit vestavěné rozpoznání. Vyber dva snímky samotného herního okna bez rámu a plochy. První zachyť s ikonou turnajů na běžné herní liště a druhý s otevřeným panelem a aktivní přihláškou. Aplikace kontroluje cenu v herních mincích a odešle přihlášku při shodě se zaznamenaným vstupným a dostatečném zůstatku.
+
+Hra a automat musí mít stejnou úroveň oprávnění Windows. Průchod AutoFish, minihra i přihlášení na základě referencí se testují simulací. Probíhající hod může skončit i bez úlovku. AutoFish se řídí stavem hry a při nejasném obraze vyčkává.
 
 Testy balíčku spusť příkazem `& $python -B -m unittest -v`.

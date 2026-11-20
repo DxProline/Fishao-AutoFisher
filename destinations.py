@@ -1,0 +1,274 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from random import choice
+
+import cv2
+import numpy as np
+
+from controls import Controls
+from game_ui import ROOT, SIZE, Hud, Interface, Point
+from spots import avatar_feet, casting_hover, shore_approach
+from window import Image, Region
+
+CURRENT = "Aktuální místo"
+LAKETOWN = "Laketown · u pekárny"
+ROTATE_EVERY = 10
+
+
+def locate(frame: Image, tile: Image, area: tuple[int, int, int, int], minimum: float = .86) -> Point | None:
+    x, y, right, bottom = area
+    sample = frame[y:bottom, x:right]
+    h, w = tile.shape[:2]
+    if sample.shape[0] < h or sample.shape[1] < w:
+        return None
+    _, score, _, (dx, dy) = cv2.minMaxLoc(cv2.matchTemplate(sample, tile, cv2.TM_CCOEFF_NORMED))
+    return ((x + dx + w / 2) / SIZE[0], (y + dy + h / 2) / SIZE[1]) if score >= minimum else None
+
+
+@dataclass(frozen=True, slots=True)
+class Marker:
+    point: Point
+    tile: Image
+
+    @classmethod
+    def capture(cls, image: Image, point: Point) -> Marker:
+        x, y = (round(p * size) for p, size in zip(point, SIZE))
+        if not 28 <= x < SIZE[0] - 28 or not 22 <= y < SIZE[1] - 22:
+            raise ValueError("Vyber výrazné místo dál od okraje okna.")
+        tile = image[y-22:y+22, x-28:x+28].copy()
+        if float(cv2.cvtColor(tile, cv2.COLOR_BGR2GRAY).std()) < 14:
+            raise ValueError("Vyber výrazný a nepohyblivý orientační bod.")
+        return cls(point, tile)
+
+    def find(self, image: Image) -> Point | None:
+        x, y = (round(p * size) for p, size in zip(self.point, SIZE))
+        return locate(image, self.tile, (max(0, x-150), max(0, y-120),
+                                       min(SIZE[0], x+150), min(SIZE[1], y+120)), .90)
+
+
+@dataclass(frozen=True, slots=True)
+class Destination:
+    name: str
+    area: str
+    map_marker: Marker | None = None
+    bank: Marker | None = None
+
+    def save(self, folder: Path) -> None:
+        if self.map_marker is None or self.bank is None:
+            raise ValueError("Lovné místo potřebuje bod na mapě i na břehu.")
+        folder.mkdir(parents=True, exist_ok=True)
+        file = next(folder / f"{i}.npz" for i in range(1, len(list(folder.glob("*.npz"))) + 2)
+                    if not (folder / f"{i}.npz").exists())
+        np.savez_compressed(file, name=self.name, area=self.area, map_point=self.map_marker.point,
+                            map_tile=self.map_marker.tile, bank_point=self.bank.point, bank_tile=self.bank.tile)
+
+    @classmethod
+    def load_all(cls, folder: Path) -> list[Destination]:
+        destinations = [cls(CURRENT, ""), cls(LAKETOWN, "Laketown")]
+        for file in sorted(folder.glob("*.npz")):
+            try:
+                with np.load(file, allow_pickle=False) as data:
+                    name, area = str(data["name"].item()), str(data["area"].item())
+                    if not name or not area or any(d.name == name for d in destinations):
+                        continue
+                    markers = []
+                    for prefix in ("map", "bank"):
+                        x, y = map(float, data[prefix + "_point"])
+                        tile = data[prefix + "_tile"]
+                        if not (0 < x < 1 and 0 < y < 1 and tile.shape == (44, 56, 3)
+                                and tile.dtype == np.uint8):
+                            raise ValueError("Neplatný orientační bod.")
+                        markers.append(Marker((x, y), tile))
+                    destinations.append(cls(name, area, *markers))
+            except (OSError, KeyError, ValueError):
+                continue
+        return destinations
+
+
+@dataclass(frozen=True, slots=True)
+class TravelSettings:
+    destination: Destination
+    places: tuple[Destination, ...]
+    refill: bool = False
+    ponds: bool = False
+    maps: bool = False
+
+
+class Navigator:
+    AREAS = {
+        "bakery_door": (700, 80, 1150, 485),
+        "bakery_inside": (362, 50, 890, 190),
+        "bakery_counter": (460, 235, 800, 380),
+        "bakery_exit": (560, 480, 715, 607),
+        "jamie_offer": (480, 140, 793, 258),
+        "jamie_yes": (770, 145, 875, 244),
+        "jamie_reward": (970, 85, 1250, 175),
+        "jamie_done": (510, 152, 778, 252),
+        "map_button": (285, 544, 640, 675),
+        "map_title": (480, 0, 799, 70),
+        "map_laketown": (480, 95, 732, 207),
+    }
+
+    def __init__(self, settings: TravelSettings) -> None:
+        self.settings = settings
+        self.destination = settings.destination
+        self.laketown = Destination(LAKETOWN, "Laketown")
+        self.templates = {key: Interface._image(ROOT / (key + ".png")) for key in self.AREAS}
+        self.visit = self.destination.name != CURRENT
+        self.refill = ""
+        self.next_action = 0.
+        self.previous: tuple[str, Point] | None = None
+        self.previous_at = 0.
+        self.next_rotation = ROTATE_EVERY
+        self.map_pending = False
+        self.wants_bread = False
+
+    def match(self, image: Image, name: str) -> Point | None:
+        return locate(image, self.templates[name], self.AREAS[name])
+
+    def reset_confirmation(self) -> None:
+        self.previous = None
+
+    def _click(self, action: str, point: Point, now: float, controls: Controls, region: Region,
+               delay: float = 1.3) -> bool:
+        old, self.previous = self.previous, (action, point)
+        previous_at, self.previous_at = self.previous_at, now
+        if (not old or now - previous_at > .6 or old[0] != action
+                or max(abs(a-b) for a,b in zip(old[1], point)) > .008):
+            return False
+        if not controls.click(region, *point):
+            return False
+        self.previous = None
+        self.next_action = now + delay
+        return True
+
+    def _rotate(self, casts: int) -> None:
+        if casts < self.next_rotation:
+            return
+        self.next_rotation = casts + ROTATE_EVERY
+        candidates = [p for p in self.settings.places if p.area and p.name != self.destination.name and (
+            self.settings.ponds and p.area == self.destination.area
+            or self.settings.maps and p.area != self.destination.area
+        )]
+        if candidates:
+            self.destination = choice(candidates)
+            self.visit = True
+            self.map_pending = False
+
+    def _map(self, image: Image, goal: Destination, now: float, controls: Controls, region: Region,
+             stable: bool) -> str:
+        if self.match(image, "map_title"):
+            if goal.map_marker:
+                point = goal.map_marker.find(image)
+            else:
+                anchor = self.match(image, "map_laketown")
+                point = (anchor[0] - 21 / SIZE[0], anchor[1] + 46 / SIZE[1]) if anchor else None
+            if point and not self.map_pending and self._click("map-destination", point, now, controls, region, 2.8):
+                self.map_pending = True
+            return f"Mapa · vybírám {goal.area}" if point else f"Mapa · čekám na značku oblasti {goal.area}"
+        if not self.map_pending and stable:
+            button = self.match(image, "map_button")
+            if button:
+                self._click("map-open", button, now, controls, region)
+        return f"Přesun do oblasti {goal.area} · čekám na ověřenou trasu"
+
+    def tick(self, image: Image, frame: Image, hud: Hud | None, stable: bool, casts: int,
+             now: float, controls: Controls, region: Region, *, timed: bool = False) -> str | None:
+        self.wants_bread = False
+        if timed and not self.refill:
+            self.reset_confirmation()
+            return None
+        if now < self.next_action:
+            return "Čekám na dokončení přesunu"
+        if not self.refill and stable and hud is not None and hud.bait == 0 and self.settings.refill:
+            self.refill = "enter"
+            self.map_pending = False
+        if self.refill:
+            return self._bakery(image, hud, stable, now, controls, region)
+        if not self.visit and stable and hud and hud.energy and hud.bait:
+            self._rotate(casts)
+        if self.visit:
+            return self._visit(image, frame, stable, now, controls, region)
+        self.reset_confirmation()
+        return None
+
+    def _bakery(self, image: Image, hud: Hud | None, stable: bool,
+                now: float, controls: Controls, region: Region) -> str | None:
+        inside = self.match(image, "bakery_inside")
+        if self.refill == "enter":
+            if inside:
+                self.refill = "counter"
+                self.map_pending = False
+            else:
+                door = self.match(image, "bakery_door")
+                if door and stable:
+                    self._click("bakery-door", door, now, controls, region, 2.3)
+                    return "Přesun ke dveřím pekárny"
+                if self.destination.name != CURRENT:
+                    return self._map(image, self.laketown, now, controls, region, stable)
+                return "Návnada došla. Pro návrat z pekárny potřebuji vidět její dveře nebo mít zvolené lovné místo."
+        if self.refill == "counter":
+            if not inside:
+                return "Čekám na zobrazení interiéru pekárny"
+            if self.match(image, "jamie_offer"):
+                yes = self.match(image, "jamie_yes")
+                if yes and self._click("dough-free", yes, now, controls, region):
+                    self.refill = "receipt"
+                return "Jamie · potvrzuji bezplatnou návnadu"
+            counter = self.match(image, "bakery_counter")
+            if counter and stable:
+                self._click("bakery-counter", (counter[0], counter[1] - 65 / SIZE[1]),
+                            now, controls, region, 2.)
+            return "Pekárna · čekám na Jamieho nabídku"
+        if self.refill == "receipt":
+            if inside and self.match(image, "jamie_reward"):
+                self.refill = "exit"
+            else:
+                return "Pekárna · čekám na potvrzení přijetí návnady"
+        if self.refill == "exit":
+            if inside:
+                done = self.match(image, "jamie_done")
+                rug = self.match(image, "bakery_exit")
+                if done:
+                    self._click("jamie-close", done, now, controls, region)
+                elif rug:
+                    self._click("bakery-exit", rug, now, controls, region, 2.3)
+                return "Návnada vyzvednuta · odcházím z pekárny"
+            if stable and self.match(image, "bakery_door"):
+                self.refill = "equip"
+        if self.refill == "equip":
+            if stable and hud and hud.bread and hud.bait:
+                self.refill = ""
+                if self.destination.name == CURRENT:
+                    self.destination = self.laketown
+                self.visit = True
+                self.map_pending = False
+                return "Návnada nasazena · vracím se k vodě"
+            self.wants_bread = bool(stable and hud)
+            return "Pekárna · vybírám chléb v inventáři"
+        return "Pekárna · čekám na ověření návratu ven"
+
+    def _visit(self, image: Image, frame: Image, stable: bool,
+               now: float, controls: Controls, region: Region) -> str | None:
+        if stable and not self.match(image, "bakery_inside"):
+            if self.destination.bank:
+                bank = self.destination.bank.find(image)
+                if bank:
+                    feet = avatar_feet(frame, bank)
+                    if feet and max(abs(a-b) for a,b in zip(feet, bank)) < .040 and casting_hover(frame):
+                        self.visit = self.map_pending = False
+                        return None
+                    if feet:
+                        self._click("walk-bank", bank, now, controls, region, 1.8)
+                    return f"Jdu na místo · {self.destination.name}"
+            elif self.match(image, "bakery_door"):
+                step = shore_approach(frame, max_distance_hats=25)
+                if step:
+                    self._click("walk-laketown", step, now, controls, region, 1.35)
+                elif casting_hover(frame):
+                    self.visit = self.map_pending = False
+                    return None
+                return "Laketown · přicházím k rybníku u pekárny"
+        return self._map(image, self.destination, now, controls, region, stable)

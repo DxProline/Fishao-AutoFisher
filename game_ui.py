@@ -31,6 +31,8 @@ class Hud:
     ready: bool | None
     rod_button: Point
     bait_button: Point
+    basic_rod: bool = False
+    bread: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +44,7 @@ class Inventory:
     close: Point
     next_page: Point | None
     page: tuple[int, int] | None
+    bread_slots: tuple[Point, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +68,8 @@ class Interface:
                            "world_icon", "world_title", "trout_destination", "trout_spawn",
                            "supply_icon", "supply_title", "supply_cash", "simple_rod", "big_rod",
                            "supply_price", "bait_tab", "rod_tab", "worms_bait", "bait_price", "shop_close",
-                           "line_icon", "line_title", "line_upgrade")}
+                           "line_icon", "line_title", "line_upgrade",
+                           "rod_basic", "bait_empty", "bread_icon", "timed_fishing")}
         # Porovnáváme vnitřek blesku. Okraje obsahují průhledné pozadí mapy.
         lightning = cv2.cvtColor(self.templates["energy"], cv2.COLOR_BGR2HSV)
         self.energy_mask = cv2.erode(cv2.inRange(lightning, (75, 125, 130), (110, 255, 255)),
@@ -113,7 +117,8 @@ class Interface:
             return None
         return int("".join(str(digit) for _, digit in sorted(found)))
 
-    def normalize(self, frame: Image) -> Image:
+    @staticmethod
+    def normalize(frame: Image) -> Image:
         if frame.shape[:2] == (SIZE[1], SIZE[0]):
             return frame
         return cv2.resize(frame, SIZE, interpolation=cv2.INTER_AREA)
@@ -137,6 +142,9 @@ class Interface:
                 and self.result_close(image, "caught") is not None):
             return "caught"
         return None
+
+    def timed_fishing(self, image: Image) -> bool:
+        return self._find(image, "timed_fishing", (50, 97, 410, 200), .90) is not None
 
     def result_close(self, image: Image, result: str) -> Point | None:
         # Záložní klik smí mířit jen na rozpoznaný křížek konkrétního výsledku.
@@ -187,8 +195,26 @@ class Interface:
 
     def _gear_count(self, patch: Image) -> int | None:
         count = self.number(patch, white=True)
-        # Vyšší práh oddělí sousední bílé číslice spojené vyhlazenou hranou.
-        return count if count is not None else self.number(patch, white=True, white_floor=235)
+        if count is None:
+            count = self.number(patch, white=True, white_floor=235)
+        if count is None and self._red_badge(patch):
+            # Zmenšení okna ztlumí bílé číslice. Vyžadujeme shodu obou prahů.
+            faint = self.number(patch, white=True, white_floor=189)
+            if faint is not None and faint == self.number(patch, white=True, white_floor=193):
+                return faint
+        return count
+
+    @staticmethod
+    def _red_badge(badge: Image) -> bool:
+        hsv = cv2.cvtColor(badge, cv2.COLOR_BGR2HSV)
+        red = (hsv[:, :, 0] <= 13) & (hsv[:, :, 1] >= 150) & (hsv[:, :, 2] >= 175)
+        return float(red.mean()) > .10
+
+    def _basic_rod(self, image: Image, rod: Match, badge: Image) -> bool:
+        # Základní dřevěný prut má na ověřeném HUD vlastní ikonu a nemá červené počítadlo.
+        if self._red_badge(badge):
+            return False
+        return self._find(image, "rod_basic", (rod.x+23, rod.y+33, rod.x+78, rod.y+88), .9) is not None
 
     def hud(self, image: Image) -> Hud | None:
         values = cv2.matchTemplate(image[:74, 450:640], self.templates["energy"],
@@ -202,11 +228,26 @@ class Interface:
         ready = self.fishing_ready(image, rod, bait)
         energy_x += 450
         e = self.number(image[energy_y+11:energy_y+31,energy_x+55:energy_x+98],white=False)
-        r = self._gear_count(image[rod.y+76:rod.y+93,rod.x+44:rod.x+79])
-        b = self._gear_count(image[bait.y+76:bait.y+93,bait.x+44:bait.x+79])
-        if b is None and self._find(image, "empty_hook", (1163, 462, 1251, 550), .90):
+        rod_badge = image[rod.y+76:rod.y+93,rod.x+44:rod.x+79]
+        basic = ready and self._basic_rod(image, rod, rod_badge)
+        r = None if basic else self._gear_count(rod_badge)
+        bait_area = (bait.x+20, bait.y+32, bait.x+78, bait.y+90)
+        empty = ready and self._find(image, "bait_empty", bait_area, .89)
+        b = 0 if empty else self._gear_count(image[bait.y+76:bait.y+93,bait.x+44:bait.x+79])
+        if b is None and ready and self._find(image, "empty_hook", (1163, 462, 1251, 550), .90):
             b = 0
-        return Hud(e,r,b,ready,rod.point(50,48),bait.point(50,48))
+        bread = bool(ready and b and self._bread(image[bait.y+32:bait.y+90, bait.x+20:bait.x+78]))
+        return Hud(e,r,b,ready,rod.point(50,48),bait.point(50,48),basic,bread)
+
+    def _bread(self, patch: Image) -> bool:
+        template = self.templates["bread_icon"]
+        for scale in (.8, 1., 1.16):
+            tile = cv2.resize(template, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+            if patch.shape[0] >= tile.shape[0] and patch.shape[1] >= tile.shape[1]:
+                _, score, _, _ = cv2.minMaxLoc(cv2.matchTemplate(patch, tile, cv2.TM_CCOEFF_NORMED))
+                if score >= .87:
+                    return True
+        return False
 
     def inventory(self, image: Image) -> Inventory | None:
         anchor = self._find(image,"inventory",(385,15,880,150),.85)
@@ -222,6 +263,7 @@ class Interface:
         select = self._find(image,"select",select_area,.83) or self._find(image,"select_hover",select_area,.83)
         count = self.number(image[y+70:y+100,x+319:x+411],white=True)
         slots = []
+        bread_slots = []
         if tab:
             for row in range(2):
                 for col in range(5):
@@ -231,11 +273,15 @@ class Interface:
                         continue
                     gray = cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY)
                     if float(np.mean(gray < 147)) >= .014 and float(np.mean(gray > 175)) >= .35:
-                        slots.append(anchor.point(dx,dy))
+                        point = anchor.point(dx,dy)
+                        slots.append(point)
+                        if tab == "bait" and self._bread(patch):
+                            bread_slots.append(point)
         # Ovládání stránky je ověřené na jednom listu; klik vzniká pouze po čtení obou čísel.
         current = self.number(image[y+486:y+505,x+327:x+337],white=False)
         total = self.number(image[y+486:y+505,x+352:x+363],white=False)
         page = (current,total) if current and total and current <= total else None
         return Inventory(tab,count,tuple(slots),select.point(51,14) if select else None,
-                         anchor.point(464,23),anchor.point(400,496) if page and page[0]<page[1] else None,page)
+                         anchor.point(464,23),anchor.point(400,496) if page and page[0]<page[1] else None,
+                         page,tuple(bread_slots))
 

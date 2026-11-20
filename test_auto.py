@@ -9,9 +9,13 @@ import numpy as np
 import win32con
 
 from activities import Action, Activities, Panel
+from assist import PreviewClock
+from destinations import CURRENT, Destination, Navigator, TravelSettings
+from gui import App
+from tournament import BOXES, Tournament
 from bot import Auto, Cycle, Phase
 from controls import BackgroundControls, Controls
-from game_ui import EnergyShop, Hud, Interface, Inventory, Match, SIZE
+from game_ui import EnergyShop, Hud, Interface, Inventory, Match, SIZE, Match
 from progression import Progression
 from minigame import Balance, BalanceDetector, BalancePolicy
 from spots import CastTarget
@@ -360,6 +364,7 @@ class AutoTest(unittest.TestCase):
 
         class Ui:
             def normalize(self, image): return image
+            def timed_fishing(self, image): return False
             def inventory(self, image): return None
             def result(self, image): return "caught" if image[0, 0, 0] == caught else None
             def result_close(self, image, result): return close_button
@@ -408,6 +413,156 @@ class AutoTest(unittest.TestCase):
         self.assertTrue(crop_used[155])
         self.controls.escape.assert_called_once()
         self.assertEqual(auto.snapshot().caught, 1)
+
+    def test_tournament_validates_price_and_requires_two_frames(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        random = np.random.default_rng(1)
+        hud, panel = self.frame.copy(), self.frame.copy()
+        tiles = {}
+        for key, (x, y, r, b) in BOXES.items():
+            tile = random.integers(0, 256, size=(b-y,r-x,3), dtype=np.uint8)
+            tiles[key] = tile
+            if key == "icon":
+                hud[y:b, x:r] = tile
+            if key != "icon":
+                panel[y:b, x:r] = tile
+        ui = Mock()
+        ui.number.side_effect = lambda _, white: 5 if white else 20
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "profile.npz"
+            np.savez_compressed(path, fee=np.int64(5), **tiles)
+            tournament = Tournament(ui, path)
+            with patch("tournament._signup_active", return_value=True):
+                tournament.tick(hud, True, 31., self.controls, self.region)
+                self.controls.click.assert_not_called()
+                tournament.tick(hud, True, 32., self.controls, self.region)
+                self.assertEqual(self.controls.click.call_count, 1)
+                tournament.tick(panel, False, 33., self.controls, self.region)
+                self.assertEqual(self.controls.click.call_count, 1)
+                self.assertEqual(tournament.tick(panel, False, 33.5, self.controls, self.region), "Přihlašuji turnaj.")
+                self.assertEqual(self.controls.click.call_count, 2)
+                self.assertEqual(tournament.last_signup, 33.5)
+                self.assertIsNone(tournament.tick(panel, False, 34., self.controls, self.region))
+
+                tournament = Tournament(ui, path)
+                ui.number.side_effect = lambda _, white: 6 if white else 20
+                tournament.tick(panel, False, 40., self.controls, self.region)
+                self.assertEqual(tournament.tick(panel, False, 41., self.controls, self.region), "Zavírám turnaje.")
+                self.assertEqual(tournament.last_signup, -600.)
+
+    def test_navigator_does_not_leave_timed_pond(self) -> None:
+        initial = Destination("Rybník A", "Laketown")
+        other = Destination("Rybník B", "Laketown")
+        nav = Navigator(TravelSettings(initial, (initial, other), refill=True, ponds=True))
+        hud = Hud(8, 40, 0, True, (.9, .5), (.9, .7))
+        self.assertIsNone(nav.tick(self.frame, self.frame, hud, True, 30, 1., self.controls,
+                                   self.region, timed=True))
+        self.assertEqual(nav.destination.name, initial.name)
+        self.assertFalse(nav.refill)
+        self.controls.click.assert_not_called()
+
+    def test_jamie_needs_confirmed_offer_then_receipt(self) -> None:
+        nav = Navigator(TravelSettings(Destination(CURRENT, ""), (), refill=True))
+        nav.refill = "counter"
+        hud = Hud(8, 40, None, False, (.9, .5), (.9, .7))
+        markers = {"bakery_inside": (.48, .2), "jamie_yes": (.65, .26)}
+        with patch.object(nav, "match", side_effect=lambda _, key: markers.get(key)):
+            def tick(now):
+                return nav.tick(self.frame, self.frame, hud, False, 0, now, self.controls, self.region)
+            tick(1.)
+            tick(1.1)
+            self.controls.click.assert_not_called()
+            markers["jamie_offer"] = (.55, .28)
+            tick(1.2)
+            self.controls.click.assert_not_called()
+            tick(1.3)
+            self.assertEqual(nav.refill, "receipt")
+            tick(4.)
+            self.assertEqual(nav.refill, "receipt")
+            self.controls.click.assert_called_once_with(self.region, .65, .26)
+            markers["jamie_reward"] = (.87, .15)
+            tick(4.1)
+            self.assertEqual(nav.refill, "exit")
+
+    def test_basic_rod_requires_matching_icon_without_red_badge(self) -> None:
+        ui = Interface()
+        frame = self.frame.copy()
+        x, y = 1151, 328
+        match = Match(x, y, 1.)
+        icon = ui.templates["rod_basic"]
+        h, w = icon.shape[:2]
+        badge = frame[y+76:y+93, x+44:x+79]
+        self.assertFalse(ui._basic_rod(frame, match, badge))
+        frame[y+36:y+36+h, x+26:x+26+w] = icon
+        self.assertTrue(ui._basic_rod(frame, match, badge))
+        badge[-9:] = (5, 35, 240)
+        self.assertFalse(ui._basic_rod(frame, match, badge))
+
+    def test_basic_rod_discards_older_spot_and_waits_for_charge(self) -> None:
+        slot = (.9, .55)
+        large = CastTarget((.4, .2), (.5, .5), .24, .54)
+        small = CastTarget((.49, .41), (.5, .5), .10, .54)
+        cycle = self.cycle
+        cycle.basic_rod = False
+        cycle.candidate = large
+        cycle.position = large.point
+        cycle.score[large.point] = 6
+        with patch("bot.casting_target", return_value=small) as measure:
+            self.auto._ready(cycle, Hud(0, None, 55, True, slot, slot, True),
+                             self.frame, 1., self.controls, self.region)
+            self.assertEqual(cycle.phase, Phase.ENERGY)
+            measure.assert_not_called()
+            charged = Hud(1, None, 55, True, slot, slot, True)
+            self.auto._ready(cycle, charged, self.frame, 2., self.controls, self.region)
+            measure.assert_called_once_with(self.frame, None, avoid=None, rejected=())
+            self.controls.cast.assert_not_called()
+            self.auto._ready(cycle, charged, self.frame, 3., self.controls, self.region)
+        self.controls.click.assert_not_called()
+        self.controls.cast.assert_called_once_with(self.region, *small.point, cancelled=ANY)
+        self.assertEqual(cycle.phase, Phase.CAST)
+
+    def test_preview_keeps_sixty_slots_with_slightly_late_capture(self) -> None:
+        clock = PreviewClock()
+        # Smyčka snímá těsně nad 120 Hz, takže stará relativní prodleva
+        # propouštěla jen každý třetí snímek.
+        times = [i * .00830 for i in range(1200)]
+        published = sum(clock.ready(now, True) for now in times)
+        self.assertEqual(published, 598)
+        self.assertTrue(clock.ready(10., False))
+        self.assertFalse(clock.ready(10.01, False))
+        self.assertTrue(clock.ready(10.02, True))
+
+    def test_mini_game_wait_uses_high_resolution_and_respects_stop(self) -> None:
+        with (patch("assist.perf_counter", return_value=1.001),
+              patch("assist.sleep") as fast_sleep,
+              patch.object(self.auto._stop_requested, "wait") as stop_wait):
+            self.auto._wait_frame(1., .008, tracking=True)
+            self.assertAlmostEqual(fast_sleep.call_args.args[0], .007)
+            stop_wait.assert_not_called()
+            self.auto._wait_frame(1., .06, tracking=False)
+            stop_wait.assert_called_once()
+            self.auto.stop()
+            self.auto._wait_frame(1., .008, tracking=True)
+            fast_sleep.assert_called_once()
+
+    def test_preview_sends_rgb_bytes_and_reuses_tk_image(self) -> None:
+        app = App.__new__(App)
+        app.root = Mock()
+        app.canvas = Mock()
+        app.canvas.winfo_width.return_value = 10
+        app.canvas.winfo_height.return_value = 10
+        app.canvas_image, app.canvas_message = 1, 2
+        app.preview_photo = None
+        app.preview_frame = np.array([[[5, 40, 200]]], np.uint8)
+        with patch("gui.tk.PhotoImage") as photo:
+            app._render_preview()
+            photo.assert_called_once_with(master=app.root, data=b"P6\n1 1\n255\n\xc8(\x05", format="ppm")
+            app.preview_frame = np.array([[[8, 1, 2], [6, 5, 4]]], np.uint8)
+            app._render_preview()
+            photo.return_value.configure.assert_called_once_with(
+                data=b"P6\n2 1\n255\n\x02\x01\x08\x04\x05\x06", format="ppm")
 
     def test_tracking_rate_counts_detections_and_expires(self) -> None:
         self.assertIsNone(self.auto._tracking_rate(True, 1.))

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ctypes
+from ctypes import wintypes
 from dataclasses import dataclass
 
 import cv2
@@ -53,7 +55,7 @@ class WindowCapture:
             raise FrameUnavailable("Okno právě změnilo stav.") from exc
 
     @staticmethod
-    def _window_pixels(region: Region, box: tuple[int, int, int, int]) -> Image:
+    def _window_pixels(region: Region, box: tuple[int, int, int, int], *, print_client: bool = False) -> Image:
         x, y, w, h = box
         handle = win32gui.GetDC(region.hwnd)
         try:
@@ -65,7 +67,14 @@ class WindowCapture:
                 try:
                     previous = target.SelectObject(bitmap)
                     try:
-                        target.BitBlt((0, 0), (w, h), source, (x, y), win32con.SRCCOPY)
+                        if print_client:
+                            printer = ctypes.windll.user32.PrintWindow
+                            printer.argtypes = (wintypes.HWND, wintypes.HDC, wintypes.UINT)
+                            printer.restype = wintypes.BOOL
+                            if not printer(region.hwnd, target.GetSafeHdc(), 3):
+                                raise FrameUnavailable("Okno nepředalo obraz pro snímání na pozadí.")
+                        else:
+                            target.BitBlt((0, 0), (w, h), source, (x, y), win32con.SRCCOPY)
                         pixels = np.frombuffer(bitmap.GetBitmapBits(True), dtype=np.uint8)
                         return cv2.cvtColor(pixels.reshape(h, w, 4), cv2.COLOR_BGRA2BGR)
                     finally:
@@ -108,8 +117,14 @@ class WindowCapture:
         if self.background:
             try:
                 image = self._window_pixels(region, (x, y, w, h))
-            except (win32gui.error, win32ui.error, ValueError) as exc:
-                raise FrameUnavailable("Okno hry dočasně neposkytuje snímky.") from exc
+            except (win32gui.error, win32ui.error, ValueError):
+                image = None
+            if image is None or not image.any():
+                try:
+                    full = self._window_pixels(region, (0, 0, region.width, region.height), print_client=True)
+                except (win32gui.error, win32ui.error, ValueError) as exc:
+                    raise FrameUnavailable("Okno hry dočasně neposkytuje snímky.") from exc
+                image = full[y:y+h, x:x+w].copy()
             if self._window_region() != region or not image.any():
                 raise FrameUnavailable("Čekám na platný snímek hry.")
             return image, region
