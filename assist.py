@@ -4,7 +4,8 @@ import logging
 import threading
 from collections import deque
 from dataclasses import replace
-from time import perf_counter
+from math import floor
+from time import perf_counter, sleep
 
 import cv2
 
@@ -20,6 +21,23 @@ FIND_SPOT_S = 20.0
 TARGET_HZ = 120
 PREVIEW_HZ = 60
 TRACK_MISSES = 4
+
+
+class PreviewClock:
+    def __init__(self) -> None:
+        self._next = 0.
+        self._tracking = False
+
+    def ready(self, now: float, tracking: bool) -> bool:
+        if tracking != self._tracking:
+            self._tracking = tracking
+            self._next = now
+        if now < self._next:
+            return False
+        interval = 1 / PREVIEW_HZ if tracking else .12
+        # Pozdní snímek nesmí posunout rytmus všech následujících snímků.
+        self._next += (floor((now - self._next) / interval) + 1) * interval
+        return True
 
 
 class Assist(threading.Thread):
@@ -58,6 +76,16 @@ class Assist(threading.Thread):
 
     def _update(self, **changes: object) -> None:
         self._state = replace(self._state, **changes)
+
+    def _wait_frame(self, started: float, interval: float, *, tracking: bool) -> None:
+        remaining = interval - (perf_counter() - started)
+        if remaining <= 0 or self.stopping:
+            return
+        if tracking:
+            # Na Windows má krátké time.sleep přesnější časovač než Event.wait.
+            sleep(remaining)
+        else:
+            self._stop_requested.wait(remaining)
 
     def _tracking_rate(self, detected: bool, now: float) -> float | None:
         times = self._tracking_times
@@ -102,7 +130,7 @@ class Assist(threading.Thread):
         last_spot: CastTarget | None = None
         next_spot = 0.0
         next_hover = 0.0
-        next_preview = 0.0
+        preview_clock = PreviewClock()
         was_active = False
         while not self.stopping:
             iteration = perf_counter()
@@ -192,8 +220,7 @@ class Assist(threading.Thread):
                     last_spot = spot
             else:
                 status = "Čekám na lištu minihry. Nahoď ručně."
-            if now >= next_preview:
-                next_preview = now + (1 / PREVIEW_HZ if entry_box else .12)
+            if preview_clock.ready(now, entry_box is not None):
                 shown = frame.copy() if reading else frame
                 if reading:
                     self._annotate(shown, reading, entry_box)
@@ -204,7 +231,7 @@ class Assist(threading.Thread):
                 elapsed_ns=round((now - start) * NS),
                 tracking_fps=self._tracking_rate(reading is not None, now),
             )
-            self._stop_requested.wait(max(0.0, 1 / TARGET_HZ - (perf_counter() - iteration)))
+            self._wait_frame(iteration, 1 / TARGET_HZ, tracking=roi is not None)
         return "Asistence zastavena. Šipky uvolněné."
 
     @staticmethod

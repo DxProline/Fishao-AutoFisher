@@ -61,7 +61,7 @@ Offline přehrávač analyzuje stabilitu scény, sledované oblasti, jejich posu
 
 Spusť asistenci přes **F8** a ručně nahoď. Po rozpoznání lišty aplikace drží opačnou šipku podle vychýlení a rychlosti ukazatele. Uprostřed ji uvolní, pokud tam ukazatel zůstává. Jakmile lištu najde, snímá výřez kolem ní s cílem až 120 vzorků za sekundu. Skutečnou rychlost měří GUI. Ztratí-li lištu nebo fokus, uvolní vstup. **F8** je pauza, **F9** konec. Po zmizení lišty zkontroluj výsledek a zavři jej klávesou Esc.
 
-Ukazatel **Sledování sn./s** měří frekvenci úspěšného rozpoznání tečky. Náhled se v minihře snaží obnovovat až 60krát za sekundu. Skutečná frekvence závisí na rychlosti hry, snímání a počítače. Po ojedinělém výpadku rozpoznání zůstává snímání ve výřezu lišty, aby se tečka rychle znovu zachytila.
+Ukazatel **Detekce sn./s** měří frekvenci úspěšného rozpoznání tečky. **Náhled sn./s** uvádí rychlost aktualizace obrázku v aplikaci s cílem 60 sn./s během minihry. Skutečná frekvence závisí na rychlosti hry, snímání a počítače. Po ojedinělém výpadku rozpoznání zůstává snímání ve výřezu lišty, aby se tečka rychle znovu zachytila.
 
 Volitelný režim jednoho zkušebního hodu:
 

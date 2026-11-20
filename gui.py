@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import base64
 import logging
 import os
 import tkinter as tk
+from collections import deque
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from queue import Empty, SimpleQueue
+from time import perf_counter
 from tkinter import filedialog, messagebox, ttk
 
 import cv2
@@ -63,6 +64,7 @@ class App:
         self.preview_photo: tk.PhotoImage | None = None
         self.preview_index = -1
         self.preview_frame: Image | None = None
+        self.preview_times: deque[float] = deque()
         self.shortcut_warning: str | None = None
         self.log_handlers = self._log_setup()
         self.hotkeys = Hotkeys(lambda: self.actions.put("toggle"), self._emergency)
@@ -150,11 +152,11 @@ class App:
             ttk.Separator(sidebar).pack(fill="x", pady=(0, 10))
         ttk.Label(sidebar, text="Statistiky", style="Metric.TLabel").pack(anchor="w", pady=(0, 8))
         self.metrics: dict[str, tk.StringVar] = {}
-        labels = ("Minihry", "Vzorky", "Sledování sn./s", "Čas snímání") if self.assist else (
+        labels = ("Minihry", "Vzorky", "Detekce sn./s", "Náhled sn./s", "Čas snímání") if self.assist else (
             "Uloženo", "Vynecháno", "Průměr sn./s", "Čas snímání", "Vstupy",
         )
         if self.autofish:
-            labels = ("Hody", "Chyceno", "Uteklo", "Sledování sn./s", "Čas snímání")
+            labels = ("Hody", "Chyceno", "Uteklo", "Detekce sn./s", "Náhled sn./s", "Čas snímání")
         for label in labels:
             card = ttk.Frame(sidebar, style="Card.TFrame", padding=(0, 4))
             card.pack(fill="x")
@@ -222,12 +224,15 @@ class App:
         scale = min(1.0, 920/w, 520/h, self.canvas.winfo_width() / w, self.canvas.winfo_height() / h)
         if scale < 1.0:
             image = cv2.resize(image, (max(1, round(w * scale)), max(1, round(h * scale))), interpolation=cv2.INTER_AREA)
-        ok, encoded = cv2.imencode(".png", image, [cv2.IMWRITE_PNG_COMPRESSION, 1])
-        if not ok:
-            return
-        self.preview_photo = tk.PhotoImage(master=self.root, data=base64.b64encode(encoded).decode("ascii"), format="png")
-        self.canvas.itemconfigure(self.canvas_image, image=self.preview_photo)
-        self.canvas.itemconfigure(self.canvas_message, state="hidden")
+        h, w = image.shape[:2]
+        pixels = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        data = f"P6\n{w} {h}\n255\n".encode("ascii") + pixels.tobytes()
+        if self.preview_photo is None:
+            self.preview_photo = tk.PhotoImage(master=self.root, data=data, format="ppm")
+            self.canvas.itemconfigure(self.canvas_image, image=self.preview_photo)
+            self.canvas.itemconfigure(self.canvas_message, state="hidden")
+        else:
+            self.preview_photo.configure(data=data, format="ppm")
 
     def _buttons(self) -> None:
         recorder = self.recorder
@@ -259,6 +264,7 @@ class App:
             self.preview_index = -1
             self.preview_photo = None
             self.preview_frame = None
+            self.preview_times.clear()
             self.canvas.itemconfigure(self.canvas_image, image="")
             self.canvas.itemconfigure(self.canvas_message, state="normal")
             if self.autofish:
@@ -295,11 +301,21 @@ class App:
         self.folder.set(str(state.folder or self.output_dir))
         sec = state.active_ns // NS
         fps = state.saved * NS / state.active_ns if state.active_ns else None
+        now = perf_counter()
+        if state.preview is not None and state.preview[0] != self.preview_index:
+            self.preview_index, self.preview_frame = state.preview
+            self._render_preview()
+            self.preview_times.append(now)
+        while self.preview_times and now - self.preview_times[0] > 1:
+            self.preview_times.popleft()
+        times = self.preview_times
+        preview_fps = (len(times) - 1) / (times[-1] - times[0]) if len(times) > 1 else None
         for label, value in {
             "Uloženo": str(state.saved),
             "Vynecháno": str(state.dropped + state.missed),
             "Průměr sn./s": f"{fps:.1f}" if fps is not None else "—",
-            "Sledování sn./s": f"{state.tracking_fps:.1f}" if state.tracking_fps is not None else "—",
+            "Detekce sn./s": f"{state.tracking_fps:.1f}" if state.tracking_fps is not None else "—",
+            "Náhled sn./s": f"{preview_fps:.1f}" if preview_fps is not None else "—",
             "Čas snímání": f"{sec // 3600:02}:{sec // 60 % 60:02}:{sec % 60:02}",
             "Vstupy": str(state.inputs),
             "Minihry": str(state.saved),
@@ -310,9 +326,6 @@ class App:
         }.items():
             if label in self.metrics:
                 self.metrics[label].set(value)
-        if state.preview is not None and state.preview[0] != self.preview_index:
-            self.preview_index, self.preview_frame = state.preview
-            self._render_preview()
 
     def _events(self) -> None:
         lines = []
@@ -360,7 +373,8 @@ class App:
                 handler.close()
             self.root.destroy()
         else:
-            self.root.after(16, self._poll)
+            self.root.after(8 if isinstance(self.recorder, Assist) and not self.recorder.snapshot().finished else 16,
+                            self._poll)
 
     def close(self) -> None:
         self.closing = True

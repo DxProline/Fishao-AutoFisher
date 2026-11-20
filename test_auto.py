@@ -8,9 +8,11 @@ import cv2
 import numpy as np
 import win32con
 
+from assist import PreviewClock
 from bot import Auto, Cycle, Phase
 from controls import BackgroundControls, Controls
 from game_ui import Hud, Interface, Inventory, SIZE
+from gui import App
 from minigame import Balance, BalancePolicy
 from spots import CastTarget
 from tournament import BOXES, Tournament
@@ -356,6 +358,47 @@ class AutoTest(unittest.TestCase):
         self.assertAlmostEqual(self.auto._tracking_rate(True, 1.02), 50.)
         self.assertAlmostEqual(self.auto._tracking_rate(False, 1.04), 25.)
         self.assertIsNone(self.auto._tracking_rate(False, 2.))
+
+    def test_preview_keeps_sixty_slots_with_slightly_late_capture(self) -> None:
+        clock = PreviewClock()
+        # Smyčka snímá těsně nad 120 Hz, takže stará relativní prodleva
+        # propouštěla jen každý třetí snímek.
+        times = [i * .00830 for i in range(1200)]
+        published = sum(clock.ready(now, True) for now in times)
+        self.assertEqual(published, 598)
+        self.assertTrue(clock.ready(10., False))
+        self.assertFalse(clock.ready(10.01, False))
+        self.assertTrue(clock.ready(10.02, True))
+
+    def test_mini_game_wait_uses_high_resolution_and_respects_stop(self) -> None:
+        with (patch("assist.perf_counter", return_value=1.001),
+              patch("assist.sleep") as fast_sleep,
+              patch.object(self.auto._stop_requested, "wait") as stop_wait):
+            self.auto._wait_frame(1., .008, tracking=True)
+            self.assertAlmostEqual(fast_sleep.call_args.args[0], .007)
+            stop_wait.assert_not_called()
+            self.auto._wait_frame(1., .06, tracking=False)
+            stop_wait.assert_called_once()
+            self.auto.stop()
+            self.auto._wait_frame(1., .008, tracking=True)
+            fast_sleep.assert_called_once()
+
+    def test_preview_sends_rgb_bytes_and_reuses_tk_image(self) -> None:
+        app = App.__new__(App)
+        app.root = Mock()
+        app.canvas = Mock()
+        app.canvas.winfo_width.return_value = 10
+        app.canvas.winfo_height.return_value = 10
+        app.canvas_image, app.canvas_message = 1, 2
+        app.preview_photo = None
+        app.preview_frame = np.array([[[5, 40, 200]]], np.uint8)
+        with patch("gui.tk.PhotoImage") as photo:
+            app._render_preview()
+            photo.assert_called_once_with(master=app.root, data=b"P6\n1 1\n255\n\xc8(\x05", format="ppm")
+            app.preview_frame = np.array([[[8, 1, 2], [6, 5, 4]]], np.uint8)
+            app._render_preview()
+            photo.return_value.configure.assert_called_once_with(
+                data=b"P6\n2 1\n255\n\x02\x01\x08\x04\x05\x06", format="ppm")
 
     def test_predicts_fast_drift_and_resets_after_missing_marker(self) -> None:
         policy = BalancePolicy()

@@ -5,7 +5,7 @@ from enum import Enum
 from pathlib import Path
 from time import perf_counter
 
-from assist import PREVIEW_HZ, TARGET_HZ, TRACK_MISSES, Assist
+from assist import TARGET_HZ, TRACK_MISSES, Assist, PreviewClock
 from controls import BackgroundControls, Controls
 from game_ui import Hud, Interface, Inventory, Point
 from minigame import BalanceDetector, BalancePolicy, PixelBox
@@ -100,7 +100,8 @@ class Auto(Assist):
         last_seen = 0.
         observed_result: str | None = None
         result_seen = 0
-        next_preview = active = 0.
+        preview_clock = PreviewClock()
+        active = 0.
         last_tick: float | None = None
         crop_misses = 0
         arrow_logged = False
@@ -257,8 +258,7 @@ class Auto(Assist):
                     message = "Čekám na dostupný prut nebo návnadu."
                 if activity:
                     message = activity
-            if active >= next_preview:
-                next_preview = active + (1 / PREVIEW_HZ if selected_crop else .12)
+            if preview_clock.ready(captured_at, selected_crop is not None):
                 preview = frame.copy() if balance else frame
                 if balance:
                     self._annotate(preview,balance,selected_crop)
@@ -268,7 +268,7 @@ class Auto(Assist):
             self._update(text=message,casts=cycle.casts,caught=cycle.caught,escaped=cycle.escaped,
                          active_ns=round(active*NS), tracking_fps=tracking_fps)
             interval = 1 / TARGET_HZ if crop else .025 if cycle.phase in (Phase.CAST, Phase.WAIT) else .06
-            self._stop_requested.wait(max(0., interval-(perf_counter()-tick)))
+            self._wait_frame(tick, interval, tracking=crop is not None)
         return "AutoFish vypnutý. Šipky uvolněné."
 
     def _ready(self, cycle: Cycle, hud: Hud, frame: Image, now: float, controls: Controls, region: Region) -> str | None:
