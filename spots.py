@@ -71,6 +71,13 @@ def _open_water(hsv: Image) -> np.ndarray:
     deep_sea = cv2.inRange(hsv, (96, 86, 75), (124, 255, 255))
     shallow = cv2.inRange(hsv, (47, 16, 145), (95, 92, 255))
     blue = cv2.bitwise_or(sea, deep_sea)
+    # Tyrkysová řeka může mít u břehu sytější zelenomodrý přechod.
+    # Připoj jen hladké části navazující na větší plochu se spolehlivým odstínem vody.
+    river_edge = cv2.inRange(hsv, (63, 85, 120), (83, 255, 255))
+    if cv2.countNonZero(river_edge):
+        change = cv2.morphologyEx(hsv[:, :, 2], cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
+        river_edge = cv2.bitwise_and(river_edge, cv2.inRange(change, 0, 22))
+        shallow = cv2.bitwise_or(shallow, river_edge)
     water = _water_surfaces(cv2.bitwise_or(blue, shallow), blue)
 
     # Pstruží rybník má olivový odstín a jednotný povrch. Při podobné

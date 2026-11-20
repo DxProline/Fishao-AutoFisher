@@ -306,6 +306,17 @@ class AutoTest(unittest.TestCase):
         tick(2, 3.)
         self.controls.click.assert_called_once()
 
+    def test_looks_for_casting_ring_before_walking_from_bank(self) -> None:
+        auto = Auto(agent=True)
+        hud = Hud(8, 20, 20, True, (.95, .55), (.95, .73))
+        with (patch("bot.casting_target", return_value=None), patch("bot.shore_approach") as approach,
+              patch("bot.casting_hover", return_value=(.56, .5))):
+            for now in (1., 1.25, 1.75, 2.):
+                auto._ready(self.cycle, hud, self.frame, now, self.controls, self.region)
+        self.assertEqual(self.controls.hover.call_count, 2)
+        approach.assert_not_called()
+        self.controls.cast.assert_not_called()
+
     def test_agent_approaches_shore_before_casting(self) -> None:
         auto = Auto(agent=True)
         walk = (.5, .5)

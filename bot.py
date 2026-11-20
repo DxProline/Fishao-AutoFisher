@@ -410,6 +410,17 @@ class Auto(Assist):
             preferred = cycle.candidate.point if cycle.candidate else cycle.preferred()
             target = casting_target(frame, preferred, avoid=cycle.position, rejected=tuple(cycle.rejected))
             cycle.next_scan = now if target is not None else now + .2
+            if target is None and now >= cycle.next_hover and not self.stopping and not self.paused:
+                point = casting_hover(frame, cycle.hover_probe)
+                if point is not None:
+                    if controls.hover(region, *point):
+                        cycle.hover_probe += 1
+                        if cycle.hover_probe <= 2:
+                            cycle.next_hover = now + .65
+                            return None
+                    cycle.next_hover = now + 1.5
+            if target is None and 0 < cycle.hover_probe <= 2 and now < cycle.next_hover:
+                return None
             if (target is None and (self.agent or timed) and cycle.shore_moves < 5
                     and not self.stopping and not self.paused):
                 step = shore_approach(frame)
@@ -425,12 +436,6 @@ class Auto(Assist):
                         return "Přicházím k vodě."
             else:
                 cycle.shore_step = None
-            if target is None and now >= cycle.next_hover and not self.stopping and not self.paused:
-                point = casting_hover(frame, cycle.hover_probe)
-                if point is not None:
-                    if controls.hover(region, *point):
-                        cycle.hover_probe += 1
-                    cycle.next_hover = now + 1.5
             if target is not None and not self.stopping and not self.paused:
                 if not controls.pointer_at(region, *target.point):
                     controls.hover(region, *target.point)

@@ -293,6 +293,30 @@ class RecordedWorkflow(unittest.TestCase):
         self.assertLess(y, pond_end)
         self.assertLess(np.hypot(x - center[0], y - center[1]), radius)
 
+    def test_turquoise_river_edge_is_reachable_with_short_rod(self) -> None:
+        height, width = 485, 900
+        river_start, river_end = 490, 745
+        hsv = np.full((height, width, 3), (46, 213, 130), np.uint8)
+        hsv[:, river_start:river_end] = (89, 211, 155)
+        hsv[:, river_start:535] = (70, 160, 207)
+        hsv[225:305, 260:364] = (70, 160, 207)  # Izolovaná podobná plocha na souši.
+        frame = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+        center, radius = (483, 260), 65
+        cv2.ellipse(frame, (483, 232), (14, 13), 0, 0, 360, (170, 50, 105), -1)
+        hover = casting_hover(frame)
+        self.assertIsNotNone(hover)
+        self.assertGreater(hover[0] * width, river_start)
+        self.assertLess(hover[0] * width, 535)
+        self.assertIsNone(casting_target(frame))
+
+        cv2.circle(frame, center, radius, (235, 245, 250), 3, cv2.LINE_AA)
+        target = casting_target(frame, preferred=(.36, .54))
+        self.assertIsNotNone(target)
+        x, y = target.point[0] * width, target.point[1] * height
+        self.assertGreater(x, river_start)
+        self.assertLess(x, 535)
+        self.assertLess(np.hypot(x - center[0], y - center[1]), radius)
+
     def test_paid_farm_water_requires_fenced_layout(self) -> None:
         hsv = np.full((681, 1264, 3), (54, 211, 160), np.uint8)
         hsv[:, :150, :] = hsv[:, 1104:, :] = 0
