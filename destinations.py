@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -101,12 +102,12 @@ class Navigator:
     AREAS = {
         "bakery_door": (65, 75, 1150, 681),
         "bakery_inside": (362, 50, 890, 190),
-        "bakery_counter": (460, 235, 800, 380),
-        "bakery_exit": (560, 480, 715, 607),
-        "jamie_offer": (480, 140, 793, 258),
-        "jamie_yes": (770, 145, 875, 244),
-        "jamie_reward": (970, 85, 1250, 175),
-        "jamie_done": (510, 152, 778, 252),
+        "bakery_counter": (410, 215, 850, 419),
+        "bakery_exit": (528, 480, 744, 625),
+        "jamie_offer": (450, 122, 816, 285),
+        "jamie_yes": (740, 122, 910, 260),
+        "jamie_reward": (940, 74, 1259, 195),
+        "jamie_done": (480, 135, 809, 280),
         "map_button": (285, 544, 640, 675),
         "map_title": (480, 0, 799, 70),
         "map_laketown": (480, 95, 732, 207),
@@ -128,6 +129,10 @@ class Navigator:
         self.arrived = False
         self.wants_bread = False
         self.jamie_close_sent = False
+        self.approach_steps = 0
+        self.bakery_retry_at = 0.
+        self.receipt_deadline = 0.
+        self.log = logging.getLogger("fishao")
 
     def match(self, image: Image, name: str) -> Point | None:
         return locate(image, self.templates[name], self.AREAS[name])
@@ -146,6 +151,15 @@ class Navigator:
             return False
         self.previous = None
         self.next_action = now + delay
+        if action in ("bakery-door", "approach-jamie", "bakery-counter", "dough-free", "jamie-close", "bakery-exit"):
+            self.log.info("Pekárna: %s.", {
+                "bakery-door": "vstupuji dveřmi",
+                "approach-jamie": "klikám na podlahu před pultem",
+                "bakery-counter": "klikám na Jamieho",
+                "dough-free": "potvrzuji nabídku tlačítkem YES",
+                "jamie-close": "zavírám Jamieho dialog",
+                "bakery-exit": "klikám na rohož u východu",
+            }[action])
         return True
 
     def _reset_trip(self) -> None:
@@ -198,10 +212,11 @@ class Navigator:
             return None
         if now < self.next_action:
             return "Čekám na dokončení přesunu"
-        if (not self.refill and stable and hud is not None and hud.bait == 0 and self.settings.refill
-                and (self.match(image, "bakery_door") or self._bakery_inside(image))):
-            self.refill = "enter"
-            self._reset_trip()
+        if not self.refill and self.settings.refill and now >= self.bakery_retry_at:
+            if self.in_bakery(image):
+                self._start_bakery("counter" if not hud or not hud.bread or not hud.bait else "exit")
+            elif stable and hud and hud.bait == 0 and self.match(image, "bakery_door"):
+                self._start_bakery("enter")
         if self.refill:
             return self._bakery(image, frame, hud, stable, now, controls, region, cancelled)
         if not self.visit and stable and hud and hud.energy and hud.bait:
@@ -211,97 +226,119 @@ class Navigator:
         self.reset_confirmation()
         return None
 
-    def _bakery_inside(self, image: Image) -> bool:
+    def in_bakery(self, image: Image) -> bool:
         return bool(self.match(image, "bakery_inside") or (
             self.match(image, "bakery_counter") and self.match(image, "bakery_exit")
         ))
 
+    def _start_bakery(self, stage: str) -> None:
+        self.refill = stage
+        self.approach_steps = 0
+        self.jamie_close_sent = False
+        self._reset_trip()
+        self.log.info("Pekárna: doplňuji bezplatnou návnadu.")
+
+    def _return_from_bakery(self) -> None:
+        self.refill = "return"
+        if self.destination.name == CURRENT:
+            self.destination = self.laketown
+        self.visit = self.arrived = True
+        self._reset_trip()
+        self.log.info("Pekárna: jsem venku, vracím se k vodě.")
+
+    def bread_unavailable(self, now: float) -> None:
+        self.refill = ""
+        self.bakery_retry_at = now + 30.
+        self.log.warning("Chléb se v inventáři nepotvrdil. Pokračuji s dostupnou návnadou.")
+
     def _bakery(self, image: Image, frame: Image, hud: Hud | None, stable: bool, now: float,
                 controls: Controls, region: Region, cancelled: Callable[[], bool]) -> str | None:
-        inside = self._bakery_inside(image)
-        if self.refill == "enter":
-            if inside:
-                self.refill = "counter"
-                self.reset_confirmation()
-            else:
-                door = self.match(image, "bakery_door")
-                if door and stable:
-                    self._click("bakery-door", door, now, controls, region, 2.3)
-                    return "Přesun ke dveřím pekárny"
-                if stable:
-                    self.refill = ""
-                    self._reset_trip()
-                    return None
-                return "Pekárna · čekám na načtení vstupu"
-
-        if self.refill == "counter":
-            if self.match(image, "jamie_offer"):
-                yes = self.match(image, "jamie_yes")
-                if yes and self._click("dough-free", yes, now, controls, region):
-                    self.refill = "receipt"
-                return "Jamie · potvrzuji bezplatnou návnadu"
-            counter = self.match(image, "bakery_counter") if inside and stable else None
-            if counter:
-                stand = (counter[0], counter[1] + 43 / SIZE[1])
-                feet = avatar_feet(frame, stand)
-                if feet and abs(feet[0] - stand[0]) <= .045 and abs(feet[1] - stand[1]) <= .065:
-                    baker = (counter[0], counter[1] - 65 / SIZE[1])
-                    self._click("bakery-counter", baker, now, controls, region, 2.)
-                elif feet:
-                    self._walk("walk-jamie", frame, stand, now, controls, region, cancelled)
-                else:
-                    self._click("approach-jamie", stand, now, controls, region)
-            return "Pekárna · přicházím k Jamiemu a čekám na nabídku"
-
-        if self.refill == "receipt":
-            if self.match(image, "jamie_reward") or self.match(image, "jamie_done"):
-                self.refill = "dialog"
-                self.jamie_close_sent = False
-                self.reset_confirmation()
-            else:
-                return "Pekárna · čekám na potvrzení přijetí chleba"
-
-        if self.refill == "dialog":
+        if self.refill in ("enter", "counter", "receipt", "dialog", "exit", "leaving"):
+            inside = self.in_bakery(image)
             done = self.match(image, "jamie_done")
+            reward = self.match(image, "jamie_reward")
+            offer = self.match(image, "jamie_offer")
+            bread = bool(hud and hud.bread and hud.bait)
+
+            if done or reward:
+                if self.refill not in ("dialog", "exit", "leaving"):
+                    self.refill = "dialog"
+                    self.reset_confirmation()
+                    self.log.info("Pekárna: přijetí chleba potvrzeno obrazem.")
             if done:
                 counter = self.match(image, "bakery_counter") if not self.jamie_close_sent else None
                 point = (counter[0], counter[1] - 65 / SIZE[1]) if counter else done
                 if self._click("jamie-close", point, now, controls, region):
                     self.jamie_close_sent = True
                 return "Jamie · zavírám dialog po vyzvednutí chleba"
-            if not (inside and stable):
-                return "Jamie · čekám na zavření dialogu"
-            self.refill = "exit"
-            self.reset_confirmation()
+            if offer:
+                yes = self.match(image, "jamie_yes")
+                if yes and self._click("dough-free", yes, now, controls, region, 2.2):
+                    self.refill = "receipt"
+                    self.receipt_deadline = now + 7.
+                return "Jamie · potvrzuji bezplatnou návnadu"
 
-        if self.refill in ("exit", "leaving"):
-            if inside:
-                if not stable:
-                    return "Pekárna · čekám na přístup k východu"
+            if not inside:
+                door = self.match(image, "bakery_door") if stable else None
+                if self.refill == "enter" and door:
+                    self._click("bakery-door", door, now, controls, region, 2.3)
+                    return "Přesun ke dveřím pekárny"
+                outside = stable and (door or (
+                    self.refill != "enter" and self._fishable(frame)
+                ))
+                if outside and (bread or self.refill in ("receipt", "dialog", "exit", "leaving")):
+                    self._return_from_bakery()
+                    return "Pekárna · vracím se k vodě"
+                if outside or stable and self.refill == "enter":
+                    self.refill = ""
+                    self._reset_trip()
+                    return None
+                return "Pekárna · ověřuji, zda jsem uvnitř nebo u vody"
+
+            if self.refill == "enter":
+                self.refill = "counter"
+                self.reset_confirmation()
+                self.log.info("Pekárna: rozpoznán interiér, mířím k pultu.")
+            if bread and self.refill in ("counter", "receipt"):
+                self.refill = "dialog"
+            if self.refill in ("dialog", "exit", "leaving"):
                 rug = self.match(image, "bakery_exit")
                 if rug and self._click("bakery-exit", rug, now, controls, region, 2.3):
                     self.refill = "leaving"
                 return "Návnada vyzvednuta · odcházím z pekárny"
-            if (self.refill == "leaving" and stable and not self.match(image, "map_title")
-                    and (self.match(image, "bakery_door") or self._fishable(frame))):
-                self.refill = "return"
-                if self.destination.name == CURRENT:
-                    self.destination = self.laketown
-                self.visit = True
-                self._reset_trip()
-                self.arrived = self.destination.area.casefold() == "laketown"
-            else:
-                return "Pekárna · ověřuji odchod ven"
+            if self.refill == "receipt":
+                if now < self.receipt_deadline or not stable:
+                    return "Pekárna · čekám na potvrzení přijetí chleba"
+                self.refill = "exit"
+                self.log.info("Pekárna: nabídka zmizela. Chléb ověřím po návratu k vodě.")
+                return "Pekárna · ověřím chléb u vody"
+            counter = self.match(image, "bakery_counter")
+            if counter:
+                stand = (counter[0], counter[1] + 43 / SIZE[1])
+                feet = avatar_feet(frame, stand)
+                if feet and abs(feet[0] - stand[0]) <= .045 and abs(feet[1] - stand[1]) <= .065:
+                    baker = (counter[0], counter[1] - 65 / SIZE[1])
+                    self._click("bakery-counter", baker, now, controls, region, 2.)
+                elif feet and self.approach_steps < 3 and walking_direction(frame, stand):
+                    self._walk("walk-jamie", frame, stand, now, controls, region, cancelled)
+                    if self.next_action > now:
+                        self.approach_steps += 1
+                        self.log.info("Pekárna: jdu klávesou WASD směrem k pultu.")
+                elif self._click("approach-jamie", stand, now, controls, region):
+                    self.approach_steps = 0
+            return "Pekárna · přicházím k Jamiemu a čekám na nabídku"
 
         if self.refill == "return":
             status = self._visit(image, frame, stable, now, controls, region, cancelled)
             if status is not None:
                 return status
             self.refill = "equip"
+            self.log.info("Pekárna: břeh potvrzen, vybírám návnadu.")
             return "Jsem u vody · připravuji výběr chleba"
 
         if stable and hud and hud.bread and hud.bait:
             self.refill = ""
+            self.log.info("Chléb nasazen, pokračuji v rybaření.")
             return None
         self.wants_bread = bool(stable and hud)
         return "U vody · vybírám chléb v inventáři"
@@ -327,7 +364,7 @@ class Navigator:
     def _visit(self, image: Image, frame: Image, stable: bool, now: float, controls: Controls,
                region: Region, cancelled: Callable[[], bool]) -> str | None:
         map_visible = self.match(image, "map_title") is not None
-        if map_visible or not stable or self._bakery_inside(image):
+        if map_visible or not stable or self.in_bakery(image):
             return self._map(image, self.destination, now, controls, region, stable,
                              map_visible=map_visible)
 

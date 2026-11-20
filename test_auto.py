@@ -245,6 +245,52 @@ class AutoTest(unittest.TestCase):
         agent.tick(self.frame, False, 2., self.controls, self.region)
         self.controls.click.assert_called_once_with(self.region, 986 / SIZE[0], 67 / SIZE[1])
 
+    def test_mission_sweep_reads_five_pages_even_when_opened_on_the_last(self) -> None:
+        ui = Interface()
+        agent = Activities(ui)
+        page = 5
+        frames = []
+        for number in range(1, 6):
+            image = np.full_like(self.frame, (180, 231, 250))
+            for name, x, y in (("missions_title", 554, 49), ("activity_close", 971, 54)):
+                tile = ui.templates[name]
+                height, width = tile.shape[:2]
+                image[y:y+height, x:x+width] = tile
+            cv2.putText(image, str(number), (366, 511), 0, .65, (30, 50, 80), 2)
+            cv2.putText(image, "5", (403, 511), 0, .65, (30, 50, 80), 2)
+            cv2.putText(image, f"Mission {number}", (330, 282), 0, .7, (30, 50, 80), 2)
+            if number > 1:
+                cv2.ellipse(image, (332, 503), (20, 14), 0, 0, 360, (220, 140, 14), -1)
+            if number < 5:
+                cv2.ellipse(image, (448, 503), (20, 14), 0, 0, 360, (220, 140, 14), -1)
+            if number == 3:
+                tile = ui.templates["mission_rare_fish"]
+                height, width = tile.shape[:2]
+                image[221:221+height, 315:315+width] = tile
+            frames.append(image)
+
+        def click(_, x, y):
+            nonlocal page
+            if x < .3:
+                page -= 1
+            elif x < .5:
+                page += 1
+            else:
+                page = 0
+            return True
+
+        self.controls.click.side_effect = click
+        with patch("activities.log_cards") as report:
+            for step in range(140):
+                if not page:
+                    break
+                agent.tick(frames[page - 1], False, step * .15, self.controls, self.region)
+            self.assertEqual(page, 0)
+            self.assertEqual(len(agent.mission_pages), 5)
+            self.assertTrue(agent.rare_fish)
+            report.assert_called_once()
+            self.assertIsNone(agent.tick(self.frame, False, 25., self.controls, self.region))
+
     def test_tournament_icon_requires_opt_in(self) -> None:
         ui = Interface()
         tile = ui.templates["tournament_icon"]
@@ -575,13 +621,14 @@ class AutoTest(unittest.TestCase):
             def tick(now, reading=hud, ready=True):
                 return nav.tick(self.frame, self.frame, reading, ready, 0, now, self.controls, self.region)
 
-            tick(1.)
-            tick(1.1)
+            nav.refill = "enter"
+            tick(1., reading=None, ready=False)
+            tick(1.1, reading=None, ready=False)
             self.controls.walk.assert_called_once_with(self.region.hwnd, "w", cancelled=ANY)
             self.controls.click.assert_not_called()
             feet.return_value = (.5, .53)
-            tick(2.)
-            tick(2.1)
+            tick(2., reading=None, ready=False)
+            tick(2.1, reading=None, ready=False)
             self.controls.click.assert_called_once_with(self.region, .5, counter[1] - 65 / SIZE[1])
             markers.update(jamie_offer=(.55, .28), jamie_yes=(.65, .26))
             tick(4.2, ready=False)
@@ -589,25 +636,25 @@ class AutoTest(unittest.TestCase):
             self.assertEqual(nav.refill, "receipt")
 
             markers.clear()
-            markers["bakery_door"] = (.81, .85)
-            tick(5.8)
+            tick(5.8, reading=None, ready=False)
             self.assertFalse(nav.wants_bread)
             self.assertEqual(nav.refill, "receipt")
             self.assertEqual(self.controls.click.call_count, 2)
 
             markers.update(bakery_inside=(.48, .2), bakery_counter=counter, bakery_exit=rug, jamie_done=(.48, .25))
-            tick(6., ready=False)
-            tick(6.1, ready=False)
+            tick(6.6, ready=False)
+            tick(6.7, ready=False)
             self.assertEqual(nav.refill, "dialog")
             self.assertFalse(nav.wants_bread)
             markers.pop("jamie_done")
-            tick(7.5)
-            tick(7.6)
+            tick(8.1, ready=False)
+            tick(8.2, ready=False)
             self.assertEqual(nav.refill, "leaving")
 
             markers.pop("bakery_inside")
             markers.pop("bakery_exit")
-            tick(10.)
+            markers["bakery_door"] = (.81, .85)
+            tick(10.6)
             self.assertEqual(nav.refill, "return")
             self.assertFalse(nav.wants_bread)
             fishable.return_value = True
@@ -663,6 +710,22 @@ class AutoTest(unittest.TestCase):
             tick(4.1)
             self.assertEqual(nav.refill, "dialog")
             self.assertFalse(nav.wants_bread)
+
+    def test_manual_bakery_departure_after_yes_resumes_at_shore(self) -> None:
+        nav = Navigator(TravelSettings(Destination(CURRENT, ""), ()))
+        nav.refill = "receipt"
+        hud = Hud(8, 40, 75, True, (.9, .5), (.9, .7), bread=True)
+        with (patch.object(nav, "match", return_value=None),
+              patch.object(nav, "_fishable", return_value=True),
+              patch("destinations.shore_approach", return_value=None)):
+            for now in (1., 2.):
+                self.assertIsNotNone(nav.tick(self.frame, self.frame, hud, True, 0, now,
+                                              self.controls, self.region))
+            self.assertIsNone(nav.tick(self.frame, self.frame, hud, True, 0, 3.,
+                                       self.controls, self.region))
+        self.assertEqual(nav.refill, "")
+        self.assertFalse(nav.wants_bread)
+        self.controls.click.assert_not_called()
 
     def test_basic_rod_requires_matching_icon_without_red_badge(self) -> None:
         ui = Interface()

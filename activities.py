@@ -8,7 +8,8 @@ import cv2
 import numpy as np
 
 from controls import Controls
-from game_ui import Interface, Point
+from game_ui import SIZE, Interface, Match, Point
+from mission_text import log_cards
 from window import Image, Region
 
 
@@ -35,7 +36,11 @@ class Activities:
         self.next_action = 0.
         self.opening_until = 0.
         self.previous: Action | None = None
-        self.pages = 0
+        self.mission_pages: dict[bytes, tuple[str, Image]] = {}
+        self.rewind_missions = True
+        self.pending_page: tuple[bytes, int] | None = None
+        self.mission_deadline = 0.
+        self.reported_missions = False
         self.rare_fish = False
         self.reading_missions = False
         self.last_signup = -600.
@@ -56,6 +61,7 @@ class Activities:
             return "Otevřený turnaj čeká na ruční ovládání."
         watching = missions is not None or tournament or now < self.opening_until
         if not watching and not ready:
+            self.reading_missions = False
             self.reset_observation()
             return None
         if now < self.next_action:
@@ -67,23 +73,19 @@ class Activities:
             if not self.reading_missions:
                 self.reading_missions = True
                 self.rare_fish = False
-                self.pages = 0
-            self.rare_fish |= find(image, "mission_rare_fish", (305, 214, 540, 263), .88) is not None
-            next_button = find(image, "missions_next", (424, 481, 478, 529), .84)
-            if next_button is not None and self.pages < 12:
-                # Šipka poslední strany zešedne, samotný tvar nestačí.
-                button = image[next_button.y:next_button.y+23, next_button.x:next_button.x+33]
-                hsv = cv2.cvtColor(button, cv2.COLOR_BGR2HSV)
-                if float(np.mean(hsv[:, :, 1] >= 150)) >= .35:
-                    action = Action("Další mise", next_button.point(16, 11))
-            if action is None:
-                action = self._close(image, "Dokončeno čtení misí")
+                self.mission_pages.clear()
+                self.reported_missions = False
+                self.rewind_missions = True
+                self.pending_page = None
+                self.mission_deadline = now + 35.
+            action = self._mission_action(image, missions, now)
         elif tournament:
             self.opening_until = 0.
             action = self._signup(image) if now - self.last_signup >= 600. else None
             if action is None:
                 action = self._close(image, "Turnaj zatím nelze přihlásit")
         elif not watching:
+            self.reading_missions = False
             for panel, key, area, center in (
                 (Panel.MISSIONS, "missions_icon", (0, 180, 84, 279), (22, 20)),
                 (Panel.TOURNAMENT, "tournament_icon", (590, 604, 658, 666), (17, 15)),
@@ -107,6 +109,59 @@ class Activities:
                 self._applied(action, now)
             return action.name
         return "Čekám na ověřený herní panel." if watching else None
+
+    @staticmethod
+    def _mission_arrow(image: Image, title: Match, *, next_page: bool) -> Point | None:
+        # Aktivní šipka je modrá, zakázaná má stejné obrysy, ale je šedá.
+        x = title.x - (132 if next_page else 248)
+        y = title.y + 433
+        hsv = cv2.cvtColor(image[y:y+44, x:x+57], cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv, (85, 110, 90), (112, 255, 255))
+        _, _, boxes, _ = cv2.connectedComponentsWithStats(mask)
+        for dx, dy, width, height, area in boxes[1:]:
+            if 25 <= width <= 49 and 15 <= height <= 35 and area >= 340:
+                return (x + dx + width / 2) / SIZE[0], (y + dy + height / 2) / SIZE[1]
+        return None
+
+    def _mission_action(self, image: Image, title: Match, now: float) -> Action | None:
+        x, y = title.x, title.y
+        card = image[y+167:y+420, x-243:x+202]
+        text = cv2.cvtColor(card[:108], cv2.COLOR_BGR2GRAY)
+        signature = np.packbits(text < 130).tobytes()
+        current = self.ui.number(image[y+442:y+469, x-192:x-174], white=False)
+        total = self.ui.number(image[y+442:y+469, x-154:x-135], white=False)
+        if signature not in self.mission_pages:
+            if self.ui._find(image, "mission_rare_fish", (x-252, y+164, x+190, y+212), .85):
+                goal = "Chytit čtyřhvězdičkovou rybu"
+                self.rare_fish = True
+            elif self.ui._find(image, "mission_daily_quests", (x-252, y+164, x+190, y+212), .85):
+                goal = "Denní úkoly · samostatný postup zatím chybí"
+            else:
+                goal = "Úkol bez rozpoznaného postupu · pokračuji v lovu"
+            number = f"{current}/{total}" if current and total and current <= total else "stránka"
+            self.mission_pages[signature] = (number, card.copy())
+            self.log.info("Mise %s: %s.", number, goal)
+
+        if self.pending_page is None or self.pending_page[0] != signature:
+            self.pending_page = (signature, 0)
+        if now >= self.mission_deadline or self.pending_page[1] >= 3:
+            return self._close(image, "Nedokončený přehled misí, pokračuji v lovu")
+
+        if self.rewind_missions:
+            back = self._mission_arrow(image, title, next_page=False)
+            if back:
+                return Action("Předchozí mise", back)
+            if current and current > 1:
+                return None
+            self.rewind_missions = False
+
+        forward = self._mission_arrow(image, title, next_page=True)
+        if forward:
+            return Action("Další mise", forward)
+        if (current and total and current < total
+                or total and len(self.mission_pages) < total):
+            return None
+        return self._close(image, "Dokončeno čtení misí")
 
     def _close(self, image: Image, name: str) -> Action | None:
         anchor = self.ui._find(image, "activity_close", (952, 42, 1025, 97), .82)
@@ -141,12 +196,16 @@ class Activities:
         elif action.name == "Otevřít turnaj":
             self.due[Panel.TOURNAMENT] = now + 300.
             self.opening_until = now + 3.
-        elif action.name == "Další mise":
-            self.pages += 1
-        elif action.name == "Dokončeno čtení misí":
-            self.reading_missions = False
-            if self.rare_fish:
-                self.log.info("Aktivní mise: chytit čtyřhvězdičkovou rybu. Pokračuji v lovu.")
+        elif action.name in ("Další mise", "Předchozí mise") and self.pending_page is not None:
+            signature, attempts = self.pending_page
+            self.pending_page = (signature, attempts + 1)
+        elif action.name in ("Dokončeno čtení misí", "Nedokončený přehled misí, pokračuji v lovu"):
+            if not self.reported_missions:
+                self.reported_missions = True
+                self.log.info("Prohlédnuté stránky misí: %s.", len(self.mission_pages))
+                log_cards(self.log, tuple(self.mission_pages.values()))
+                if self.rare_fish:
+                    self.log.info("Aktivní mise: chytit čtyřhvězdičkovou rybu. Pokračuji v lovu.")
         elif action.name == "Přihlásit herní turnaj":
             self.last_signup = now
         self.log.info("Agent: %s.", action.name)

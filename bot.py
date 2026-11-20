@@ -270,6 +270,11 @@ class Auto(Assist):
                     self._farm_refill(cycle, ui.energy_shop(image), ready, active, controls, region)
                 elif cycle.phase is Phase.GEAR:
                     self._gear(cycle, inventory, hud, active, controls, region)
+                    if (navigator and navigator.refill == "equip" and cycle.bread_only and inventory
+                            and cycle.gear_step == "unavailable" and controls.click(region, *inventory.close)):
+                        navigator.bread_unavailable(active)
+                        cycle.next_step = active + .7
+                        cycle.advance(Phase.READY, active)
                     if (progression and not cycle.bread_only and cycle.gear_step == "unavailable" and inventory
                             and active >= progression.recheck_shop and controls.click(region, *inventory.close)):
                         cycle.gear_step = "shop"
@@ -280,6 +285,8 @@ class Auto(Assist):
                         closed = close is not None and controls.click(region, *close)
                         if not closed:
                             closed = controls.escape(region.hwnd)
+                            if closed and cycle.retries == 0:
+                                self._log.info("Výsledek: odeslán Escape.")
                         if closed:
                             cycle.retries += 1
                         cycle.next_action = active + .35
@@ -313,9 +320,19 @@ class Auto(Assist):
                         cycle.advance(Phase.READY,active)
                 activity = None
                 can_travel = cycle.phase in (Phase.READY, Phase.ENERGY) and not inventory and not result
+                if (navigator and navigator.settings.refill and not can_travel
+                        and cycle.phase in (Phase.WAIT, Phase.RESULT) and not inventory and not result
+                        and navigator.in_bakery(image)):
+                    cycle.finish_attempt(active)
+                    cycle.advance(Phase.READY, active)
+                    self._log.info("Pekárna: opouštím neplatné čekání na záběr.")
+                    can_travel = True
                 if navigator and can_travel:
+                    was_refilling = bool(navigator.refill)
                     activity = navigator.tick(image, frame, hud, stable, cycle.casts, active, controls, region,
                                               timed=farm, cancelled=lambda: self.stopping or self.paused)
+                    if was_refilling and not navigator.refill:
+                        cycle.reset_range(active)
                     if activity:
                         cycle.candidate = cycle.shore_step = None
                         if navigator.wants_bread and hud:

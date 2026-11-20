@@ -62,7 +62,7 @@ class Interface:
                           ("energy", "rod", "bait", "inventory", "select", "select_hover",
                            "caught", "escaped", "fishdex_button", "result_x", "empty_hook", "energy_plus",
                            "energy_shop", "energy_cash", "energy_price_cash", "energy_offer_five",
-                           "missions_icon", "missions_title", "missions_next", "mission_rare_fish",
+                           "missions_icon", "missions_title", "mission_rare_fish", "mission_daily_quests",
                            "tournament_icon", "tournament_podium", "tournament_start", "tournament_countdown", "activity_close",
                            "tournament_coin", "tournament_signup", "wallet_coin",
                            "world_icon", "world_title", "trout_destination", "trout_spawn",
