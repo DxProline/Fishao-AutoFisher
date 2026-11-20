@@ -10,7 +10,7 @@ import win32con
 
 from activities import Action, Activities, Panel
 from assist import PreviewClock
-from destinations import CURRENT, LAKETOWN, Destination, Navigator, TravelSettings
+from destinations import CURRENT, LAKETOWN, MAX_MAP_ATTEMPTS, Destination, Navigator, TravelSettings
 from gui import App
 from bot import Auto, Cycle, Phase
 from controls import BackgroundControls, Controls
@@ -413,6 +413,52 @@ class AutoTest(unittest.TestCase):
         self.assertTrue(crop_used[155])
         self.controls.escape.assert_called_once()
         self.assertEqual(auto.snapshot().caught, 1)
+
+    def test_map_selection_uses_two_frames_without_a_fishing_hud(self) -> None:
+        place = Destination(LAKETOWN, "Laketown")
+        nav = Navigator(TravelSettings(place, (place,)))
+        map_frame = self.frame.copy()
+        for name, x, y in (("map_title", 540, 10), ("map_laketown", 560, 117)):
+            tile = nav.templates[name]
+            h, w = tile.shape[:2]
+            map_frame[y:y+h, x:x+w] = tile
+        hud = Hud(8, 40, 8, True, (.9, .5), (.9, .7))
+        toolbar = (.31, .93)
+        original_match = nav.match
+        with (patch.object(nav, "match", wraps=nav.match) as match,
+              patch("destinations.shore_approach", return_value=None),
+              patch("destinations.casting_hover", return_value=(.41, .50))):
+            match.side_effect = lambda frame, name: toolbar if name == "map_button" else original_match(frame, name)
+            for now in (1., 1.2):
+                nav.tick(self.frame, self.frame, hud, True, 0, now, self.controls, self.region)
+            self.controls.click.assert_called_once_with(self.region, *toolbar)
+
+            nav.tick(map_frame, map_frame, None, False, 0, 2.6, self.controls, self.region)
+            self.assertEqual(self.controls.click.call_count, 1)
+            nav.tick(map_frame, map_frame, None, False, 0, 2.8, self.controls, self.region)
+            self.assertTrue(nav.map_pending)
+            self.assertEqual(self.controls.click.call_count, 2)
+
+            for now, casts in ((6., 0), (9., 10), (12., 20), (15., 30)):
+                self.assertIsNone(nav.tick(self.frame, self.frame, hud, True, casts, now,
+                                            self.controls, self.region))
+            self.assertEqual(self.controls.click.call_count, 2)
+            self.assertFalse(nav.visit)
+
+    def test_visible_map_retries_only_the_same_area_then_waits(self) -> None:
+        place = Destination(LAKETOWN, "Laketown")
+        nav = Navigator(TravelSettings(place, (place,)))
+        marks = {"map_title": (.5, .025), "map_laketown": (.49, .22)}
+        with patch.object(nav, "match", side_effect=lambda _, name: marks.get(name)):
+            for turn in range(MAX_MAP_ATTEMPTS):
+                start = 1. + turn * 4
+                for now in (start, start + .2):
+                    nav.tick(self.frame, self.frame, None, False, 0, now, self.controls, self.region)
+            text = nav.tick(self.frame, self.frame, None, False, 0, 20., self.controls, self.region)
+        self.assertIn("Vyber oblast ručně", text)
+        self.assertEqual(self.controls.click.call_count, MAX_MAP_ATTEMPTS)
+        self.assertTrue(all(args == self.controls.click.call_args_list[0]
+                            for args in self.controls.click.call_args_list))
 
     def test_laketown_after_map_selection_walks_and_hands_off_without_bakery(self) -> None:
         place = Destination(LAKETOWN, "Laketown")

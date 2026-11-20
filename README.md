@@ -98,7 +98,7 @@ Na rozpoznané placené Trout Farm agent upřednostňuje rybaření. Při nulov�
 & $python .\main.py --agent
 ```
 
-Před spuštěním lovu zapni **Mise, postup a vybavení**. Příkaz `--agent` tuto volbu předvybere. Po sérii málo úspěšných hodů umí v režimu aktuálního místa bez střídání zkusit přechod na Trout Farm. Rozpoznaná mise na čtyřhvězdičkovou rybu zkracuje dobu před porovnáním výsledků na stávajícím místě. Při chybějícím prutu nebo návnadě nejdřív projde inventář a teprve potom hledá ověřenou nabídku v obchodě. Porovnává ceny prutů a drží rezervu 30 bankovek. Při opakovaném úniku ryb prověří vlasec a po případném upgradu ponechá rezervu 5 mincí.
+Před spuštěním lovu zapni **Mise, postup a vybavení**. Příkaz `--agent` tuto volbu předvybere. Rozpoznaná mise na čtyřhvězdičkovou rybu zkracuje dobu před porovnáním výsledků na stávajícím místě. Při chybějícím prutu nebo návnadě nejdřív projde inventář a teprve potom hledá ověřenou nabídku v obchodě. Porovnává ceny prutů a drží rezervu 30 bankovek. Při opakovaném úniku ryb prověří vlasec a po případném upgradu ponechá rezervu 5 mincí.
 
 Volba **Účastnit se turnajů** je při otevření aplikace vypnutá. Zaškrtni ji před spuštěním lovu, pokud chceš turnaje vyhledávat a hlásit se za herní mince. Agent turnaje kontroluje nejvýše jednou za pět minut. Při neověřené registraci zavře panel a vrátí se k lovu. Pro změnu volby během lovu zastav agenta klávesou F9 a po změně ho znovu spusť.
 
@@ -112,7 +112,7 @@ Agent pracuje s ověřenými obrazovkami hry. Další typy misí, samostatné ob
 
 Před spuštěním zaškrtni **Lovit v překrytém okně**. Fishao nech otevřené a překryj jej prohlížečem nebo jiným oknem. Tento režim snímá klientskou plochu Fishao a předává kliknutí a šipky přímo hře. Skutečná myš zůstává volná. Při minimalizaci Fishao automat počká na obnovení okna. Režim závisí na tom, zda spuštěná hra přijímá zprávy o vstupu na pozadí. Pokud přímý vstup selže, můžeš po zastavení zvolit běžný režim.
 
-Na kartě **Lovná místa** vyber aktuální místo, rybník u pekárny v Laketownu nebo vlastní uložený břeh. Při přidání místa použij snímky klientské plochy hry bez titulku a rámečku. Vyber značku oblasti na světové mapě a výrazný bod na suchém břehu, který je po příchodu do oblasti vidět. Pro rybníky ve stejné oblasti použij stejný název mapy. Aplikace po každých deseti potvrzených nahozeních zkusí vybrat jiné registrované místo podle zapnutých voleb. Pokud orientační bod není vidět, počká na jeho zobrazení.
+Na kartě **Lovná místa** vyber aktuální místo, rybník u pekárny v Laketownu nebo vlastní uložený břeh. Při přidání místa použij snímky klientské plochy hry bez titulku a rámečku. Vyber značku oblasti na světové mapě a výrazný bod na suchém břehu, který je po příchodu do oblasti vidět. Pro rybníky ve stejné oblasti použij stejný název mapy. Vybranou mapu načte na začátku lovu a zůstane na ní. Když po příchodu nevidí uložený břeh, hledá přístup k vodě ve stejné oblasti. Volitelné střídání břehů vybírá jen uložené body, které aplikace právě vidí na téže mapě.
 
 Volba **Vyzvednout bezplatný chléb u Jamieho** spouští cestu po vyčerpání návnady. U aktuálního místa aplikace potřebuje vidět dveře pekárny. U zvoleného lovného místa může použít mapu. Nabídku potvrdí až po rozpoznání Jamieho dialogu, počká na potvrzení přijetí návnady a v inventáři hledá ikonu chleba. Po doplnění se vrátí k vybranému břehu. Při aktivním odpočtu v Trout Farm zůstává v místě a použije zásoby z inventáře.
 

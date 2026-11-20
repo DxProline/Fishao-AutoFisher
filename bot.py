@@ -7,7 +7,7 @@ from time import perf_counter
 from activities import Activities
 from assist import TARGET_HZ, TRACK_MISSES, Assist, PreviewClock
 from controls import BackgroundControls, Controls
-from destinations import CURRENT, Navigator, TravelSettings
+from destinations import Navigator, TravelSettings
 from game_ui import EnergyShop, Hud, Interface, Inventory, Point
 from minigame import BalanceDetector, BalancePolicy, PixelBox
 from progression import Progression
@@ -125,8 +125,7 @@ class Auto(Assist):
         ui, detector, policy = Interface(), BalanceDetector(), BalancePolicy()
         activities = Activities(ui, join_tournaments=self.join_tournaments) if self.agent else None
         navigator = Navigator(self.travel) if self.travel else None
-        allow_auto_farm = (self.travel is None or self.travel.destination.name == CURRENT
-                           and not (self.travel.ponds or self.travel.maps))
+        allow_auto_farm = self.travel is None
         progression = Progression(ui) if self.agent else None
         cycle = Cycle()
         crop: PixelBox | None = None

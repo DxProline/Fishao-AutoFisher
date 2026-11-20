@@ -58,7 +58,6 @@ class App:
         self.background = tk.BooleanVar(master=root, value=False)
         self.refill_bread = tk.BooleanVar(master=root, value=False)
         self.rotate_ponds = tk.BooleanVar(master=root, value=False)
-        self.rotate_maps = tk.BooleanVar(master=root, value=False)
         self.fishing_place = tk.StringVar(master=root, value=CURRENT)
         self.places_folder = output_dir / "destinations"
         self.places = Destination.load_all(self.places_folder) if autofish else []
@@ -175,8 +174,7 @@ class App:
             self.travel_options = []
             for label, variable in (
                     ("Vyzvednout bezplatný chléb u Jamieho", self.refill_bread),
-                    ("Náhodně střídat uložené rybníky na stejné mapě", self.rotate_ponds),
-                    ("Náhodně střídat uložené mapy", self.rotate_maps)):
+                    ("Střídat viditelné uložené břehy na stejné mapě", self.rotate_ponds)):
                 option = ttk.Checkbutton(places_tab, text=label, variable=variable, style="Options.TCheckbutton")
                 option.pack(anchor="w", pady=3)
                 self.travel_options.append(option)
@@ -184,7 +182,7 @@ class App:
             add.pack(anchor="w", pady=(12, 6))
             self.travel_options.append(add)
             ttk.Label(places_tab, wraplength=440, justify="left", style="Muted.TLabel",
-                      text="Pro střídání přidej alespoň dvě lovná místa. Změna se vyhodnocuje po 10 nahozeních. "
+                      text="Vybranou mapu otevře při spuštění. Pak loví ve stejné oblasti. "
                            "Při odpočtu v Trout Farm dostává přednost lov.").pack(anchor="w")
         self.canvas = tk.Canvas(preview_tab, bg=PREVIEW_BG, highlightthickness=0,
                                 borderwidth=0, width=1, height=1)
@@ -369,7 +367,7 @@ class App:
             if self.autofish:
                 place = next(p for p in self.places if p.name == self.fishing_place.get())
                 travel = TravelSettings(place, tuple(self.places), self.refill_bread.get(),
-                                        self.rotate_ponds.get(), self.rotate_maps.get())
+                                        self.rotate_ponds.get())
                 self.recorder = Auto(self.auto_casts, xp_farm=self.xp_farm, agent=self.agent.get(),
                                      background=self.background.get(),
                                      join_tournaments=self.join_tournaments.get(), travel=travel)
