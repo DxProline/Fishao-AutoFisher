@@ -11,7 +11,7 @@ import win32con
 from assist import PreviewClock
 from bot import Auto, Cycle, Phase
 from controls import BackgroundControls, Controls
-from game_ui import Hud, Interface, Inventory, SIZE
+from game_ui import Hud, Interface, Inventory, Match, SIZE
 from gui import App
 from minigame import Balance, BalancePolicy
 from spots import CastTarget
@@ -208,6 +208,43 @@ class AutoTest(unittest.TestCase):
             self.controls.cast.assert_not_called()
             self.auto._ready(self.cycle, hud, self.frame, 3., self.controls, self.region)
         self.controls.cast.assert_called_once_with(self.region, *large.point, cancelled=ANY)
+
+    def test_basic_rod_requires_matching_icon_without_red_badge(self) -> None:
+        ui = Interface()
+        frame = self.frame.copy()
+        x, y = 1151, 328
+        match = Match(x, y, 1.)
+        icon = ui.templates["rod_basic"]
+        h, w = icon.shape[:2]
+        badge = frame[y+76:y+93, x+44:x+79]
+        self.assertFalse(ui._basic_rod(frame, match, badge))
+        frame[y+36:y+36+h, x+26:x+26+w] = icon
+        self.assertTrue(ui._basic_rod(frame, match, badge))
+        badge[-9:] = (5, 35, 240)
+        self.assertFalse(ui._basic_rod(frame, match, badge))
+
+    def test_basic_rod_discards_older_spot_and_waits_for_charge(self) -> None:
+        slot = (.9, .55)
+        large = CastTarget((.4, .2), (.5, .5), .24, .54)
+        small = CastTarget((.49, .41), (.5, .5), .10, .54)
+        cycle = self.cycle
+        cycle.basic_rod = False
+        cycle.candidate = large
+        cycle.position = large.point
+        cycle.score[large.point] = 6
+        with patch("bot.casting_target", return_value=small) as measure:
+            self.auto._ready(cycle, Hud(0, None, 55, True, slot, slot, True),
+                             self.frame, 1., self.controls, self.region)
+            self.assertEqual(cycle.phase, Phase.ENERGY)
+            measure.assert_not_called()
+            charged = Hud(1, None, 55, True, slot, slot, True)
+            self.auto._ready(cycle, charged, self.frame, 2., self.controls, self.region)
+            measure.assert_called_once_with(self.frame, None, avoid=None)
+            self.controls.cast.assert_not_called()
+            self.auto._ready(cycle, charged, self.frame, 3., self.controls, self.region)
+        self.controls.click.assert_not_called()
+        self.controls.cast.assert_called_once_with(self.region, *small.point, cancelled=ANY)
+        self.assertEqual(cycle.phase, Phase.CAST)
 
     def test_cast_waits_until_pointer_is_over_confirmed_water(self) -> None:
         p = (.43, .35)

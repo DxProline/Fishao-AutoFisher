@@ -53,6 +53,13 @@ class Cycle:
     shore_step: Point | None = None
     shore_moves: int = 0
     next_step: float = 0.
+    basic_rod: bool | None = None
+
+    def reset_range(self, now: float) -> None:
+        self.candidate = self.position = self.shore_step = None
+        self.score.clear()
+        self.next_scan = self.next_hover = now
+        self.shore_moves = 0
 
     def advance(self, phase: Phase, now: float, *, progress: bool = True) -> None:
         if self.phase != phase:
@@ -95,7 +102,7 @@ class Auto(Assist):
         cycle = Cycle()
         crop: PixelBox | None = None
         expected: tuple[int,int] | None = None
-        agreement: tuple[int|None,int|None,int|None] | None = None
+        agreement: tuple[int | None, int | None, int | None, bool] | None = None
         repetitions = 0
         last_seen = 0.
         observed_result: str | None = None
@@ -191,7 +198,9 @@ class Auto(Assist):
                     self._log.info("Výsledek: %s. Úlovky: %s.", result, cycle.caught)
                 inventory = ui.inventory(image)
                 hud = ui.hud(image)
-                key = (hud.energy,hud.rod,hud.bait) if hud and hud.ready and not inventory and not result else None
+                key = (hud.energy, hud.rod, hud.bait, hud.basic_rod) if (
+                    hud and hud.ready and not inventory and not result
+                ) else None
                 repetitions = repetitions + 1 if key is not None and key == agreement else 1
                 agreement = key
                 stable = key is not None and repetitions >= 2
@@ -243,6 +252,7 @@ class Auto(Assist):
                         cycle.advance(Phase.READY,active)
                 activity = None
                 if (tournament is not None and cycle.phase in (Phase.READY, Phase.ENERGY)
+                        and hud is not None and hud.energy is not None and hud.energy > 0
                         and not inventory and not result):
                     activity = tournament.tick(image, stable, active, controls, region)
                 if not activity and cycle.phase in (Phase.READY,Phase.ENERGY) and stable and hud:
@@ -250,6 +260,8 @@ class Auto(Assist):
                 message = cycle.phase.value
                 if hud and cycle.phase in (Phase.READY, Phase.ENERGY, Phase.WAIT):
                     message += f" · energie {hud.energy if hud.energy is not None else '?'}"
+                    if hud.basic_rod:
+                        message += " · základní prut"
                 if cycle.phase is Phase.READY and cycle.candidate is None and active < cycle.next_hover:
                     message += " · čekám na kruh dosahu nad vodou"
                 if cycle.phase is Phase.READY and active < cycle.next_step:
@@ -273,17 +285,26 @@ class Auto(Assist):
 
     def _ready(self, cycle: Cycle, hud: Hud, frame: Image, now: float, controls: Controls, region: Region) -> str | None:
         if hud.energy is None:
+            cycle.candidate = cycle.shore_step = None
             return None
         if hud.energy == 0:
+            cycle.candidate = cycle.shore_step = None
             cycle.advance(Phase.ENERGY,now)
             return None
         if cycle.phase is Phase.ENERGY:
             cycle.advance(Phase.READY,now)
+        if cycle.basic_rod != hud.basic_rod:
+            cycle.reset_range(now)
+            cycle.basic_rod = hud.basic_rod
         for gear, count, slot in (("rod",hud.rod,hud.rod_button),("bait",hud.bait,hud.bait_button)):
+            if gear == "rod" and hud.basic_rod:
+                continue
             if count is None:
+                cycle.candidate = cycle.shore_step = None
                 return None
             if count == 0:
                 if not self.stopping and not self.paused and controls.click(region,*slot):
+                    cycle.reset_range(now)
                     cycle.gear = gear
                     cycle.gear_step = "choose"
                     cycle.attempted.clear()
@@ -334,10 +355,14 @@ class Auto(Assist):
             return None
         if cycle.gear_step in ("verify", "unavailable"):
             count = (hud.rod if cycle.gear == "rod" else hud.bait) if hud and hud.ready and inv is None else None
-            if count is not None and count > 0:
+            basic = bool(hud and hud.ready and inv is None and cycle.gear == "rod" and hud.basic_rod)
+            if basic or count is not None and count > 0:
                 cycle.advance(Phase.READY,now)
-                cycle.next_scan = now
-                self._log.info("Vybavení ověřeno v HUD. Zbývající hody: %s.", count)
+                cycle.reset_range(now)
+                if basic:
+                    self._log.info("Rozpoznán základní dřevěný prut. Měřím nový dosah.")
+                else:
+                    self._log.info("Vybavení ověřeno v HUD. Zbývající hody: %s.", count)
             elif cycle.gear_step == "verify" and inv is not None and inv.tab == cycle.gear and inv.select and cycle.select_attempts < 2:
                 if controls.click(region,*inv.select):
                     cycle.select_attempts += 1

@@ -31,6 +31,7 @@ class Hud:
     ready: bool
     rod_button: Point
     bait_button: Point
+    basic_rod: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +48,7 @@ class Inventory:
 class Interface:
     def __init__(self) -> None:
         self.templates = {key: self._image(ROOT / f"{key}.png") for key in
-                          ("energy", "rod", "bait", "inventory", "select", "select_hover",
+                          ("energy", "rod", "rod_basic", "bait", "inventory", "select", "select_hover",
                            "caught", "escaped", "fishdex_button", "result_x")}
         # Porovnáváme vnitřek blesku. Okraje obsahují průhledné pozadí mapy.
         lightning = cv2.cvtColor(self.templates["energy"], cv2.COLOR_BGR2HSV)
@@ -132,7 +133,26 @@ class Interface:
 
     def _gear_count(self, patch: Image) -> int | None:
         count = self.number(patch, white=True)
-        return count if count is not None else self.number(patch, white=True, white_floor=235)
+        if count is None:
+            count = self.number(patch, white=True, white_floor=235)
+        if count is None and self._red_badge(patch):
+            # Zmenšení okna ztlumí bílé číslice. Vyžadujeme shodu obou prahů.
+            faint = self.number(patch, white=True, white_floor=189)
+            if faint is not None and faint == self.number(patch, white=True, white_floor=193):
+                return faint
+        return count
+
+    @staticmethod
+    def _red_badge(badge: Image) -> bool:
+        hsv = cv2.cvtColor(badge, cv2.COLOR_BGR2HSV)
+        red = (hsv[:, :, 0] <= 13) & (hsv[:, :, 1] >= 150) & (hsv[:, :, 2] >= 175)
+        return float(red.mean()) > .10
+
+    def _basic_rod(self, image: Image, rod: Match, badge: Image) -> bool:
+        # Základní dřevěný prut má na ověřeném HUD vlastní ikonu a nemá červené počítadlo.
+        if self._red_badge(badge):
+            return False
+        return self._find(image, "rod_basic", (rod.x+23, rod.y+33, rod.x+78, rod.y+88), .9) is not None
 
     def hud(self, image: Image) -> Hud | None:
         values = cv2.matchTemplate(image[:74, 450:640], self.templates["energy"],
@@ -149,9 +169,11 @@ class Interface:
         ready = float(hsv[:,:,1].mean()) >= 100 and float(hsv[:,:,2].mean()) >= 160
         energy_x += 450
         e = self.number(image[energy_y+11:energy_y+31,energy_x+55:energy_x+98],white=False)
-        r = self._gear_count(image[rod.y+76:rod.y+93,rod.x+44:rod.x+79])
+        rod_badge = image[rod.y+76:rod.y+93,rod.x+44:rod.x+79]
+        basic = ready and self._basic_rod(image, rod, rod_badge)
+        r = None if basic else self._gear_count(rod_badge)
         b = self._gear_count(image[bait.y+76:bait.y+93,bait.x+44:bait.x+79])
-        return Hud(e,r,b,ready,rod.point(50,48),bait.point(50,48))
+        return Hud(e,r,b,ready,rod.point(50,48),bait.point(50,48),basic)
 
     def inventory(self, image: Image) -> Inventory | None:
         anchor = self._find(image,"inventory",(385,15,880,150),.85)
