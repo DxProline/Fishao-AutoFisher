@@ -56,7 +56,7 @@ class App:
         self.agent = tk.BooleanVar(master=root, value=agent)
         self.join_tournaments = tk.BooleanVar(master=root, value=False)
         self.background = tk.BooleanVar(master=root, value=False)
-        self.refill_bread = tk.BooleanVar(master=root, value=False)
+        self.refill_bread = tk.BooleanVar(master=root, value=True)
         self.rotate_ponds = tk.BooleanVar(master=root, value=False)
         self.fishing_place = tk.StringVar(master=root, value=CURRENT)
         self.places_folder = output_dir / "destinations"

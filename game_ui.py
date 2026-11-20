@@ -84,6 +84,14 @@ class Interface:
                 cv2.putText(image, str(digit), (1, 24), font, .85, 255, 2, cv2.LINE_AA)
                 self.digits[digit].append(self._glyph(image))
 
+        self.ok_glyphs: dict[str, list[np.ndarray]] = {"O": [], "K": []}
+        for letter, glyphs in self.ok_glyphs.items():
+            for font in (cv2.FONT_HERSHEY_SIMPLEX, cv2.FONT_HERSHEY_DUPLEX, cv2.FONT_HERSHEY_TRIPLEX):
+                for thickness in (1, 2):
+                    tile = np.zeros((32, 30), np.uint8)
+                    cv2.putText(tile, letter, (2, 26), font, .87, 255, thickness, cv2.LINE_8)
+                    glyphs.append(self._glyph(tile))
+
     @staticmethod
     def _image(file: Path) -> Image:
         result = cv2.imdecode(np.frombuffer(file.read_bytes(), np.uint8), cv2.IMREAD_COLOR)
@@ -132,6 +140,53 @@ class Interface:
         values = cv2.matchTemplate(sample, template, cv2.TM_CCOEFF_NORMED)
         _, score, _, (dx,dy) = cv2.minMaxLoc(values)
         return Match(x+dx,y+dy,score) if score >= threshold else None
+
+    def level_ok(self, image: Image) -> Point | None:
+        """Rozpozná zelené OK dole na světlém panelu s velkým číslem úrovně."""
+        for strip in (image[188:475, 390:442], image[188:475, 817:869]):
+            hsv = cv2.cvtColor(strip, cv2.COLOR_BGR2HSV)
+            cream = (hsv[:, :, 1] <= 125) & (hsv[:, :, 2] >= 180)
+            if np.count_nonzero(cream) < .46 * cream.size:
+                return None
+        digits = cv2.cvtColor(image[215:370, 460:804], cv2.COLOR_BGR2HSV)
+        ink = cv2.inRange(digits, (0, 125, 100), (37, 255, 255))
+        ink |= cv2.inRange(digits, (170, 125, 100), (179, 255, 255))
+        _, _, stats, _ = cv2.connectedComponentsWithStats(ink)
+        if not any(13 <= w <= 229 and 40 <= h <= 130 and area >= 240
+                   and abs(x + w / 2 - digits.shape[1] / 2) <= 96
+                   for x, _, w, h, area in stats[1:]):
+            return None
+        x0, y0, x1, y1 = 478, 451, 786, 600
+        hsv = cv2.cvtColor(image[y0:y1, x0:x1], cv2.COLOR_BGR2HSV)
+        green = cv2.inRange(hsv, (35, 99, 90), (90, 255, 255))
+        green = cv2.morphologyEx(green, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
+        count, _, stats, _ = cv2.connectedComponentsWithStats(green)
+        points = []
+        for x, y, w, h, area in stats[1:count]:
+            if not (32 <= w <= 240 and 16 <= h <= 60 and 1.5 <= w / h <= 8 and area >= .69 * w * h):
+                continue
+            if not self._reads_ok(hsv[y+2:y+h-2, x+w//5:x+w-w//5]):
+                continue
+            if abs(x + x0 + w / 2 - SIZE[0] / 2) <= 38:
+                points.append(Match(x + x0, y + y0, 1.).point(w // 2, h // 2))
+        return points[0] if len(points) == 1 else None
+
+    def _reads_ok(self, hsv: Image) -> bool:
+        ink = cv2.inRange(hsv, (0, 0, 196), (179, 90, 255))
+        _, labels, stats, centers = cv2.connectedComponentsWithStats(ink)
+        letters = [i for i, (_, _, w, h, a) in enumerate(stats) if i and
+                   4 <= w <= 27 and 6 <= h <= 29 and a >= 10]
+        if len(letters) != 2:
+            return False
+        letters.sort(key=lambda i: centers[i, 0])
+        if abs(centers[letters[0], 1] - centers[letters[1], 1]) > 3:
+            return False
+        scores = []
+        for letter, index in zip("OK", letters):
+            x, y, w, h, _ = stats[index]
+            glyph = self._glyph(((labels[y:y+h, x:x+w] == index) * 255).astype(np.uint8))
+            scores.append(min(float(np.abs(glyph - reference).mean()) for reference in self.ok_glyphs[letter]))
+        return max(scores) <= .29
 
     def result(self, image: Image) -> str | None:
         if self._find(image,"escaped",(350,225,925,337),.87):

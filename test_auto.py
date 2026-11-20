@@ -376,6 +376,7 @@ class AutoTest(unittest.TestCase):
         class Ui:
             def normalize(self, image): return image
             def timed_fishing(self, image): return False
+            def level_ok(self, image): return None
             def inventory(self, image): return None
             def result(self, image): return "caught" if image[0, 0, 0] == caught else None
             def result_close(self, image, result): return close_button
@@ -513,6 +514,69 @@ class AutoTest(unittest.TestCase):
         self.assertEqual(nav.destination.name, initial.name)
         self.assertFalse(nav.refill)
         self.controls.click.assert_not_called()
+
+    def test_level_panel_confirms_only_central_green_ok(self) -> None:
+        ui = Interface()
+        frame = self.frame.copy()
+        frame[151:556, 367:896] = (186, 232, 250)
+        cv2.putText(frame, "200", (530, 328), cv2.FONT_HERSHEY_DUPLEX, 3.2, (12, 70, 244), 11)
+        frame[508:545, 563:701] = (20, 151, 42)
+        cv2.putText(frame, "OK", (615, 535), cv2.FONT_HERSHEY_DUPLEX, .75, (245, 248, 250), 2)
+        button = ui.level_ok(frame)
+        self.assertIsNotNone(button)
+        self.assertAlmostEqual(button[0], .5, places=2)
+        self.assertAlmostEqual(button[1], 526 / SIZE[1], places=2)
+        self.assertTrue(self.auto._level_dialog(self.cycle, button, 1., self.controls, self.region))
+        self.controls.click.assert_not_called()
+        self.assertTrue(self.auto._level_dialog(self.cycle, button, 1.1, self.controls, self.region))
+        self.auto._level_dialog(self.cycle, button, 1.2, self.controls, self.region)
+        self.controls.click.assert_called_once_with(self.region, *button)
+
+        no_number = frame.copy()
+        no_number[215:370, 460:804] = (186, 232, 250)
+        self.assertIsNone(ui.level_ok(no_number))
+        frame[508:545, 563:701] = (20, 151, 42)
+        cv2.putText(frame, "YES", (609, 535), cv2.FONT_HERSHEY_DUPLEX, .75, (245, 248, 250), 2)
+        self.assertIsNone(ui.level_ok(frame))
+        self.assertFalse(self.auto._level_dialog(self.cycle, None, 1.3, self.controls, self.region))
+
+    def test_empty_bait_prefers_visible_bakery_and_falls_through_elsewhere(self) -> None:
+        place = Destination(CURRENT, "")
+        nav = Navigator(TravelSettings(place, (place,)))
+        hud = Hud(8, 40, 0, True, (.9, .5), (.9, .7))
+        self.assertIsNone(nav.tick(self.frame, self.frame, hud, True, 0, 1., self.controls, self.region))
+        self.assertEqual(nav.refill, "")
+        self.controls.click.assert_not_called()
+        door = (.57, .90)
+        x, y = round(door[0] * SIZE[0]), round(door[1] * SIZE[1])
+        tile = nav.templates["bakery_door"]
+        h, w = tile.shape[:2]
+        frame = self.frame.copy()
+        frame[y-h//2:y-h//2+h, x-w//2:x-w//2+w] = tile
+        target = nav.match(frame, "bakery_door")
+        self.assertIsNotNone(target)
+        for now in (2., 2.2):
+            nav.tick(frame, frame, hud, True, 0, now, self.controls, self.region)
+        self.controls.click.assert_called_once_with(self.region, *target)
+        self.assertEqual(nav.refill, "enter")
+
+    def test_refill_equips_bread_and_returns_to_water_after_leaving_bakery(self) -> None:
+        place = Destination(CURRENT, "")
+        nav = Navigator(TravelSettings(place, (place,)))
+        nav.refill = "exit"
+        no_bait = Hud(8, 40, 0, True, (.9, .5), (.9, .7))
+        filled = Hud(8, 40, 75, True, (.9, .5), (.9, .7), bread=True)
+        with (patch.object(nav, "match", return_value=None),
+              patch("destinations.shore_approach", return_value=None),
+              patch("destinations.casting_hover", return_value=(.41, .50))):
+            nav.tick(self.frame, self.frame, no_bait, True, 0, 1., self.controls, self.region)
+            self.assertEqual(nav.refill, "equip")
+            self.assertTrue(nav.wants_bread)
+            nav.tick(self.frame, self.frame, filled, True, 0, 2., self.controls, self.region)
+            self.assertEqual(nav.refill, "")
+            self.assertEqual(nav.destination.name, LAKETOWN)
+            self.assertIsNone(nav.tick(self.frame, self.frame, filled, True, 0, 3., self.controls, self.region))
+            self.assertFalse(nav.visit)
 
     def test_jamie_needs_confirmed_offer_then_receipt(self) -> None:
         nav = Navigator(TravelSettings(Destination(CURRENT, ""), (), refill=True))

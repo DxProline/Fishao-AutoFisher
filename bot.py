@@ -63,6 +63,9 @@ class Cycle:
     refill_sent: bool = False
     basic_rod: bool | None = None
     bread_only: bool = False
+    level_button: Point | None = None
+    level_click_after: float = 0.
+    level_clicks: int = 0
 
     def reset_range(self, now: float) -> None:
         self.candidate = self.position = self.shore_step = None
@@ -153,7 +156,7 @@ class Auto(Assist):
                 policy.choose(None)
                 self._tracking_times.clear()
                 cycle.candidate = None
-                cycle.shore_step = None
+                cycle.shore_step = cycle.level_button = None
                 agreement, repetitions, ready_frames = None, 0, 0
                 last_tick = None
                 self._update(text="Pozastaveno. Pokračuj přes F8.", tracking_fps=None)
@@ -172,7 +175,7 @@ class Auto(Assist):
                 policy.choose(None)
                 self._tracking_times.clear()
                 cycle.candidate = None
-                cycle.shore_step = None
+                cycle.shore_step = cycle.level_button = None
                 agreement, repetitions, ready_frames = None, 0, 0
                 crop = None
                 crop_misses = 0
@@ -192,6 +195,7 @@ class Auto(Assist):
                 continue
             controls.direction(region.hwnd, direction)
             tracking_fps = self._tracking_rate(balance is not None, captured_at)
+            image = ui.normalize(frame) if not balance and selected_crop is None else None
             if balance:
                 if activities:
                     activities.reset_observation()
@@ -222,8 +226,12 @@ class Auto(Assist):
                     crop = None
                     crop_misses = 0
                 message = "Hledám ukazatel na liště minihry."
+            elif image is not None and self._level_dialog(cycle, ui.level_ok(image), active, controls, region):
+                agreement, repetitions, ready_frames = None, 0, 0
+                cycle.candidate = cycle.shore_step = None
+                message = "Potvrzuji novou úroveň"
             else:
-                image = ui.normalize(frame)
+                assert image is not None
                 result = ui.result(image) if cycle.phase is not Phase.GEAR else None
                 if result != observed_result:
                     observed_result, result_seen = result, 0
@@ -369,6 +377,21 @@ class Auto(Assist):
             interval = 1/TARGET_HZ if crop else .025 if cycle.phase in (Phase.CAST, Phase.WAIT) else .06
             self._wait_frame(tick, interval, tracking=crop is not None)
         return "AutoFish vypnutý. Šipky uvolněné."
+
+    def _level_dialog(self, cycle: Cycle, button: Point | None, now: float,
+                      controls: Controls, region: Region) -> bool:
+        previous, cycle.level_button = cycle.level_button, button
+        if button is None:
+            cycle.level_clicks = 0
+            cycle.level_click_after = 0.
+            return False
+        if (previous and max(abs(a - b) for a, b in zip(previous, button)) <= .012
+                and now >= cycle.level_click_after and cycle.level_clicks < 3
+                and not self.stopping and not self.paused and controls.click(region, *button)):
+            cycle.level_clicks += 1
+            cycle.level_click_after = now + .9
+            self._log.info("Potvrzuji hlášení o nové úrovni tlačítkem OK.")
+        return True
 
     def _open_gear(self, cycle: Cycle, gear: str, slot: Point, now: float,
                    controls: Controls, region: Region, *, bread_only: bool = False) -> None:

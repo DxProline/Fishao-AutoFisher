@@ -93,13 +93,13 @@ class Destination:
 class TravelSettings:
     destination: Destination
     places: tuple[Destination, ...]
-    refill: bool = False
+    refill: bool = True
     ponds: bool = False
 
 
 class Navigator:
     AREAS = {
-        "bakery_door": (700, 80, 1150, 485),
+        "bakery_door": (65, 75, 1150, 681),
         "bakery_inside": (362, 50, 890, 190),
         "bakery_counter": (460, 235, 800, 380),
         "bakery_exit": (560, 480, 715, 607),
@@ -197,7 +197,8 @@ class Navigator:
             return None
         if now < self.next_action:
             return "Čekám na dokončení přesunu"
-        if not self.refill and stable and hud is not None and hud.bait == 0 and self.settings.refill:
+        if (not self.refill and stable and hud is not None and hud.bait == 0 and self.settings.refill
+                and (self.match(image, "bakery_door") or self.match(image, "bakery_inside"))):
             self.refill = "enter"
             self._reset_trip()
         if self.refill:
@@ -221,10 +222,11 @@ class Navigator:
                 if door and stable:
                     self._click("bakery-door", door, now, controls, region, 2.3)
                     return "Přesun ke dveřím pekárny"
-                if self.destination.name != CURRENT:
-                    return self._map(image, self.laketown, now, controls, region, stable,
-                                     map_visible=self.match(image, "map_title") is not None)
-                return "Návnada došla. Pro návrat z pekárny potřebuji vidět její dveře nebo mít zvolené lovné místo."
+                if stable:
+                    self.refill = ""
+                    self._reset_trip()
+                    return None
+                return "Pekárna · čekám na načtení vstupu"
         if self.refill == "counter":
             if not inside:
                 return "Čekám na zobrazení interiéru pekárny"
@@ -239,7 +241,7 @@ class Navigator:
                             now, controls, region, 2.)
             return "Pekárna · čekám na Jamieho nabídku"
         if self.refill == "receipt":
-            if inside and self.match(image, "jamie_reward"):
+            if inside and (self.match(image, "jamie_reward") or self.match(image, "jamie_done")):
                 self.refill = "exit"
             else:
                 return "Pekárna · čekám na potvrzení přijetí návnady"
@@ -252,7 +254,7 @@ class Navigator:
                 elif rug:
                     self._click("bakery-exit", rug, now, controls, region, 2.3)
                 return "Návnada vyzvednuta · odcházím z pekárny"
-            if stable and self.match(image, "bakery_door"):
+            if stable and not self.match(image, "map_title"):
                 self.refill = "equip"
         if self.refill == "equip":
             if stable and hud and hud.bread and hud.bait:
@@ -261,7 +263,7 @@ class Navigator:
                     self.destination = self.laketown
                 self.visit = True
                 self._reset_trip()
-                self.arrived = self.destination.name == LAKETOWN
+                self.arrived = self.destination.area.casefold() == "laketown"
                 return "Návnada nasazena · vracím se k vodě"
             self.wants_bread = bool(stable and hud)
             return "Pekárna · vybírám chléb v inventáři"
