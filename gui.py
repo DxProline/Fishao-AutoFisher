@@ -35,8 +35,13 @@ class GuiLog(logging.Handler):
     def __init__(self, destination: SimpleQueue[str]) -> None:
         super().__init__()
         self.destination = destination
+        self._last_message: str | None = None
 
     def emit(self, record: logging.LogRecord) -> None:
+        text = " ".join(record.getMessage().split())
+        if not text or text == self._last_message:
+            return
+        self._last_message = text
         self.destination.put(self.format(record))
 
 
@@ -56,6 +61,7 @@ class App:
         self.agent = tk.BooleanVar(master=root, value=agent)
         self.join_tournaments = tk.BooleanVar(master=root, value=False)
         self.background = tk.BooleanVar(master=root, value=False)
+        self.prevent_sleep = tk.BooleanVar(master=root, value=True)
         self.refill_bread = tk.BooleanVar(master=root, value=True)
         self.rotate_ponds = tk.BooleanVar(master=root, value=False)
         self.fishing_place = tk.StringVar(master=root, value=CURRENT)
@@ -85,20 +91,27 @@ class App:
         self.root.after(8 if isinstance(self.recorder, Assist) and not self.recorder.snapshot().finished else 16,
                             self._poll)
 
-    def _log_setup(self) -> tuple[logging.Handler, logging.Handler]:
+    def _log_setup(self) -> tuple[tuple[logging.Logger, logging.Handler], ...]:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         logs = self.output_dir / "runtime" / "logs"
         logs.mkdir(parents=True, exist_ok=True)
         self.log = logging.getLogger("fishao")
         self.log.setLevel(logging.INFO)
         self.log.propagate = False
-        disk = RotatingFileHandler(logs / "fishao.log", maxBytes=1_000_000, backupCount=2, encoding="utf-8")
-        disk.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        added: list[tuple[logging.Logger, logging.Handler]] = []
+        if not any(isinstance(h, RotatingFileHandler) for h in self.log.handlers):
+            disk = RotatingFileHandler(logs / "fishao.log", maxBytes=1_000_000, backupCount=2, encoding="utf-8")
+            disk.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+            self.log.addHandler(disk)
+            added.append((self.log, disk))
+        self.event_log = logging.getLogger("fishao.events")
+        self.event_log.setLevel(logging.INFO)
+        self.event_log.propagate = True
         view = GuiLog(self.messages)
         view.setFormatter(logging.Formatter("%(asctime)s  %(message)s", datefmt="%H:%M:%S"))
-        for handler in (disk, view):
-            self.log.addHandler(handler)
-        return disk, view
+        self.event_log.addHandler(view)
+        added.append((self.event_log, view))
+        return tuple(added)
 
     def _configure_styles(self) -> None:
         style = ttk.Style(self.root)
@@ -227,6 +240,9 @@ class App:
                                                      variable=self.background, style="Options.TCheckbutton",
                                                      command=self._update_preview_hint)
             self.background_option.pack(fill="x")
+            self.keep_awake_option = ttk.Checkbutton(sidebar, text="Bránit spořiči a uspání obrazovky",
+                                                     variable=self.prevent_sleep, style="Options.TCheckbutton")
+            self.keep_awake_option.pack(fill="x")
             ttk.Separator(sidebar).pack(fill="x", pady=12)
 
         ttk.Label(sidebar, text="Statistiky", style="Section.TLabel").pack(anchor="w", pady=(0, 5))
@@ -318,8 +334,12 @@ class App:
         image = self.preview_frame
         if image is None:
             return
+        cw = self.canvas.winfo_width()
+        ch = self.canvas.winfo_height()
+        if cw < 4 or ch < 4:
+            return
         h, w = image.shape[:2]
-        scale = min(1.0, 920/w, 520/h, self.canvas.winfo_width() / w, self.canvas.winfo_height() / h)
+        scale = min(1.0, 920 / w, 520 / h, cw / w, ch / h)
         if scale < 1.0:
             image = cv2.resize(image, (max(1, round(w * scale)), max(1, round(h * scale))), interpolation=cv2.INTER_AREA)
         h, w = image.shape[:2]
@@ -348,6 +368,7 @@ class App:
             self.agent_option.configure(state="disabled" if active else "normal")
             self.tournament_option.configure(state="disabled" if active or not self.agent.get() else "normal")
             self.background_option.configure(state="disabled" if active else "normal")
+            self.keep_awake_option.configure(state="disabled" if active else "normal")
             for option in self.travel_options:
                 option.configure(state="disabled" if active else "normal")
             self.place_picker.configure(state="disabled" if active else "readonly")
@@ -365,12 +386,13 @@ class App:
             self.canvas.itemconfigure(self.canvas_image, image="")
             self.canvas.itemconfigure(self.canvas_message, state="normal")
             if self.autofish:
-                place = next(p for p in self.places if p.name == self.fishing_place.get())
+                place = next((p for p in self.places if p.name == self.fishing_place.get()), self.places[0])
                 travel = TravelSettings(place, tuple(self.places), self.refill_bread.get(),
                                         self.rotate_ponds.get())
                 self.recorder = Auto(self.auto_casts, xp_farm=self.xp_farm, agent=self.agent.get(),
                                      background=self.background.get(),
-                                     join_tournaments=self.join_tournaments.get(), travel=travel)
+                                     join_tournaments=self.join_tournaments.get(), travel=travel,
+                                     prevent_sleep=self.prevent_sleep.get())
             else:
                 self.recorder = Assist(self.cast_once) if self.assist else Recorder(
                     self.output_dir, self.fps, image_format=self.image_format)
@@ -461,6 +483,7 @@ class App:
 
         if self.hotkeys.error and self.hotkeys.error != self.shortcut_warning:
             self.log.warning("%s", self.hotkeys.error)
+            self.event_log.warning("Klávesové zkratky jsou nedostupné: %s", self.hotkeys.error)
             self.shortcut_warning = self.hotkeys.error
         if self.recorder is not None:
             self._show(self.recorder.snapshot())
@@ -469,8 +492,8 @@ class App:
         self._events()
         self._buttons()
         if self.closing and not self.hotkeys.is_alive() and (self.recorder is None or self.recorder.snapshot().finished):
-            for handler in self.log_handlers:
-                self.log.removeHandler(handler)
+            for logger, handler in self.log_handlers:
+                logger.removeHandler(handler)
                 handler.close()
             self.root.destroy()
         else:

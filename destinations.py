@@ -11,6 +11,7 @@ import numpy as np
 
 from controls import Controls
 from game_ui import ROOT, SIZE, Hud, Interface, Point
+from runtime_state import EventFeed
 from spots import avatar_feet, casting_hover, casting_target, shore_approach, walking_direction
 from window import Image, Region
 
@@ -18,10 +19,15 @@ CURRENT = "Aktuální místo"
 LAKETOWN = "Laketown · u pekárny"
 ROTATE_EVERY = 10
 MAX_MAP_ATTEMPTS = 3
+BAKERY_TIMEOUT_S = 40.0
 
 
 def locate(frame: Image, tile: Image, area: tuple[int, int, int, int], minimum: float = .86) -> Point | None:
     x, y, right, bottom = area
+    x = max(0, x)
+    y = max(0, y)
+    right = min(frame.shape[1], right)
+    bottom = min(frame.shape[0], bottom)
     sample = frame[y:bottom, x:right]
     h, w = tile.shape[:2]
     if sample.shape[0] < h or sample.shape[1] < w:
@@ -113,7 +119,7 @@ class Navigator:
         "map_laketown": (480, 95, 732, 207),
     }
 
-    def __init__(self, settings: TravelSettings) -> None:
+    def __init__(self, settings: TravelSettings, *, events: EventFeed | None = None) -> None:
         self.settings = settings
         self.destination = settings.destination
         self.laketown = Destination(LAKETOWN, "Laketown")
@@ -131,8 +137,10 @@ class Navigator:
         self.jamie_close_sent = False
         self.approach_steps = 0
         self.bakery_retry_at = 0.
+        self.bakery_started_at = 0.
         self.receipt_deadline = 0.
         self.log = logging.getLogger("fishao")
+        self.events = events or EventFeed()
 
     def match(self, image: Image, name: str) -> Point | None:
         return locate(image, self.templates[name], self.AREAS[name])
@@ -182,6 +190,12 @@ class Navigator:
              stable: bool, *, map_visible: bool = False) -> str:
         if map_visible:
             if self.map_attempts >= MAX_MAP_ATTEMPTS:
+                self.events.emit(
+                    f"Výběr oblasti {goal.area} na mapě selhal (hra nepotvrdila přesun) · vyber oblast ručně.",
+                    key="map_fail",
+                    level=logging.WARNING,
+                    now=now,
+                )
                 return f"Mapa · hra nepotvrdila {goal.area}. Vyber oblast ručně."
             if goal.map_marker:
                 point = goal.map_marker.find(image)
@@ -194,6 +208,7 @@ class Navigator:
             if self._click("map-destination", point, now, controls, region, 2.8):
                 self.map_pending = True
                 self.map_attempts += 1
+                self.events.emit(f"Cestuji přes mapu do oblasti {goal.area}.", key="map_travel", now=now)
             return f"Mapa · vybírám {goal.area}"
         if not stable:
             self.reset_confirmation()
@@ -201,6 +216,13 @@ class Navigator:
             button = self.match(image, "map_button")
             if button and self._click("map-open", button, now, controls, region):
                 self.map_open_attempts += 1
+        elif not self.map_pending and self.map_open_attempts >= MAX_MAP_ATTEMPTS:
+            self._reset_trip()
+            self.visit = False
+            if self.refill == "return":
+                self.refill = ""
+            self.events.emit("Mapa není dostupná · pokračuji v lovu zde.", key="map_unavailable", level=logging.WARNING, now=now)
+            return "Mapa není dostupná · pokračuji v lovu zde"
         return f"Přesun do oblasti {goal.area} · čekám na načtení hry"
 
     def tick(self, image: Image, frame: Image, hud: Hud | None, stable: bool, casts: int,
@@ -214,9 +236,9 @@ class Navigator:
             return "Čekám na dokončení přesunu"
         if not self.refill and self.settings.refill and now >= self.bakery_retry_at:
             if self.in_bakery(image):
-                self._start_bakery("counter" if not hud or not hud.bread or not hud.bait else "exit")
+                self._start_bakery("counter" if not hud or not hud.bread or not hud.bait else "exit", now)
             elif stable and hud and hud.bait == 0 and self.match(image, "bakery_door"):
-                self._start_bakery("enter")
+                self._start_bakery("enter", now)
         if self.refill:
             return self._bakery(image, frame, hud, stable, now, controls, region, cancelled)
         if not self.visit and stable and hud and hud.energy and hud.bait:
@@ -231,12 +253,14 @@ class Navigator:
             self.match(image, "bakery_counter") and self.match(image, "bakery_exit")
         ))
 
-    def _start_bakery(self, stage: str) -> None:
+    def _start_bakery(self, stage: str, now: float = 0.) -> None:
         self.refill = stage
         self.approach_steps = 0
         self.jamie_close_sent = False
+        self.bakery_started_at = now
         self._reset_trip()
         self.log.info("Pekárna: doplňuji bezplatnou návnadu.")
+        self.events.emit("Došla návnada · jdu do pekárny pro bezplatný chléb.", key="bakery_state", now=now)
 
     def _return_from_bakery(self) -> None:
         self.refill = "return"
@@ -250,9 +274,25 @@ class Navigator:
         self.refill = ""
         self.bakery_retry_at = now + 30.
         self.log.warning("Chléb se v inventáři nepotvrdil. Pokračuji s dostupnou návnadou.")
+        self.events.emit(
+            "Chléb se v inventáři nepotvrdil · pokračuji s dostupnou návnadou.",
+            key="bakery_fail",
+            level=logging.WARNING,
+            now=now,
+        )
 
     def _bakery(self, image: Image, frame: Image, hud: Hud | None, stable: bool, now: float,
                 controls: Controls, region: Region, cancelled: Callable[[], bool]) -> str | None:
+        if self.bakery_started_at and now - self.bakery_started_at >= BAKERY_TIMEOUT_S and self.refill not in ("return", "equip"):
+            self.log.warning("Pekárna: překročen časový limit kroku %s, zkouším odchod.", self.refill)
+            self.events.emit(
+                f"Vyzvednutí chleba v pekárně (krok {self.refill}) vypršelo · zkouším odejít k vodě.",
+                key="bakery_timeout",
+                level=logging.WARNING,
+                now=now,
+            )
+            self.refill = "exit"
+            self.bakery_started_at = now
         if self.refill in ("enter", "counter", "receipt", "dialog", "exit", "leaving"):
             inside = self.in_bakery(image)
             done = self.match(image, "jamie_done")
@@ -265,6 +305,7 @@ class Navigator:
                     self.refill = "dialog"
                     self.reset_confirmation()
                     self.log.info("Pekárna: přijetí chleba potvrzeno obrazem.")
+                    self.events.emit("Bezplatný chléb u Jamieho potvrzen · vracím se k vodě.", key="bakery_state", now=now)
             if done:
                 counter = self.match(image, "bakery_counter") if not self.jamie_close_sent else None
                 point = (counter[0], counter[1] - 65 / SIZE[1]) if counter else done
@@ -339,6 +380,7 @@ class Navigator:
         if stable and hud and hud.bread and hud.bait:
             self.refill = ""
             self.log.info("Chléb nasazen, pokračuji v rybaření.")
+            self.events.emit("Chléb nasazen · pokračuji v lovu.", key="bakery_state", now=now)
             return None
         self.wants_bread = bool(stable and hud)
         return "U vody · vybírám chléb v inventáři"

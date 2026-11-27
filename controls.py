@@ -44,6 +44,7 @@ class Controls:
         self._send.argtypes = [wintypes.UINT, ctypes.POINTER(NativeInput), ctypes.c_int]
         self._send.restype = wintypes.UINT
         self.held: str | None = None
+        self.problem: str | None = None
 
     def _inputs(self, *items: NativeInput) -> None:
         array = (NativeInput * len(items))(*items)
@@ -59,48 +60,71 @@ class Controls:
 
     def release(self) -> None:
         if self.held is not None:
-            self._arrow(self.held, up=True)
-            self.held = None
+            try:
+                self._arrow(self.held, up=True)
+            except (OSError, win32gui.error, win32api.error):
+                pass
+            finally:
+                self.held = None
 
     def direction(self, hwnd: int, requested: str | None) -> None:
-        if requested is not None and win32gui.GetForegroundWindow() != hwnd:
+        try:
+            foreground = win32gui.GetForegroundWindow()
+        except win32gui.error:
+            self.release()
+            return
+        if requested is not None and foreground != hwnd:
             requested = None
         if requested == self.held:
             return
         self.release()
-        if requested is not None and win32gui.GetForegroundWindow() == hwnd:
-            self._arrow(requested, up=False)
+        if requested is not None and foreground == hwnd:
+            try:
+                self._arrow(requested, up=False)
+            except (OSError, win32gui.error) as exc:
+                self.problem = f"Windows zamítl vstup klávesnice ({exc})."
+                return
             self.held = requested
+            self.problem = None
 
     @staticmethod
     def _pointer_move(region: Region, x: float, y: float) -> NativeInput | None:
         # Souřadnice jsou vzhledem k obsahu okna, v rozsahu 0 až 1.
-        if not (0 <= x < 1 and 0 <= y < 1) or win32gui.GetForegroundWindow() != region.hwnd:
+        try:
+            if not (0 <= x < 1 and 0 <= y < 1) or win32gui.GetForegroundWindow() != region.hwnd:
+                return None
+            client = (min(region.width - 1, int(x * region.width)), min(region.height - 1, int(y * region.height)))
+            if win32gui.GetClientRect(region.hwnd)[2:] != (region.width, region.height):
+                return None
+            if win32gui.ClientToScreen(region.hwnd, (0, 0)) != (region.x, region.y):
+                return None
+            px, py = win32gui.ClientToScreen(region.hwnd, client)
+            hovered = win32gui.WindowFromPoint((px, py))
+            if not hovered or win32gui.GetAncestor(hovered, 2) != region.hwnd:
+                return None
+            sx, sy, sw, sh = (win32api.GetSystemMetrics(i) for i in range(76, 80))
+        except (win32gui.error, win32api.error):
             return None
-        client = (min(region.width - 1, int(x * region.width)), min(region.height - 1, int(y * region.height)))
-        if win32gui.GetClientRect(region.hwnd)[2:] != (region.width, region.height):
-            return None
-        if win32gui.ClientToScreen(region.hwnd, (0, 0)) != (region.x, region.y):
-            return None
-        px, py = win32gui.ClientToScreen(region.hwnd, client)
-        hovered = win32gui.WindowFromPoint((px, py))
-        if not hovered or win32gui.GetAncestor(hovered, 2) != region.hwnd:
-            return None
-        sx, sy, sw, sh = (win32api.GetSystemMetrics(i) for i in range(76, 80))
         dx = round((px - sx) * 65535 / max(1, sw - 1))
         dy = round((py - sy) * 65535 / max(1, sh - 1))
         return NativeInput(0, InputValue(mouse=MouseInput(dx, dy, 0, 0xC001, 0, 0)))
 
     def hover(self, region: Region, x: float, y: float) -> bool:
         move = self._pointer_move(region, x, y)
-        if move is None or win32gui.GetForegroundWindow() != region.hwnd:
+        try:
+            if move is None or win32gui.GetForegroundWindow() != region.hwnd:
+                return False
+            self._inputs(move)
+        except (OSError, win32gui.error):
             return False
-        self._inputs(move)
         return True
 
     @staticmethod
     def pointer_at(region: Region, x: float, y: float) -> bool:
-        px, py = win32api.GetCursorPos()
+        try:
+            px, py = win32api.GetCursorPos()
+        except (win32api.error, win32gui.error, OSError):
+            return False
         return (abs(px - (region.x + int(x * region.width))) <= 2
                 and abs(py - (region.y + int(y * region.height))) <= 2)
 
@@ -113,14 +137,22 @@ class Controls:
             return False
         down = NativeInput(0, InputValue(mouse=MouseInput(0, 0, 0, 0x0002, 0, 0)))
         up = NativeInput(0, InputValue(mouse=MouseInput(0, 0, 0, 0x0004, 0, 0)))
-        if win32gui.GetForegroundWindow() != region.hwnd:
-            return False
         try:
+            if win32gui.GetForegroundWindow() != region.hwnd:
+                return False
             self._inputs(down)
             # Hra musí dostat stisk a uvolnění v různých snímcích.
             sleep(.055)
-        finally:
+        except (OSError, win32gui.error):
+            try:
+                self._inputs(up)
+            except (OSError, win32gui.error):
+                pass
+            return False
+        try:
             self._inputs(up)
+        except (OSError, win32gui.error):
+            return False
         return True
 
     def cast(self, region: Region, x: float, y: float, *, cancelled: Callable[[], bool]) -> bool:
@@ -135,30 +167,46 @@ class Controls:
 
     def walk(self, hwnd: int, key: str, *, cancelled: Callable[[], bool] = lambda: False) -> bool:
         scan = self._WALK_SCANS[key]
-        if cancelled() or win32gui.GetForegroundWindow() != hwnd:
+        try:
+            if cancelled() or win32gui.GetForegroundWindow() != hwnd:
+                return False
+            down = NativeInput(1, InputValue(key=KeyInput(0, scan, 0x0008, 0, 0)))
+            up = NativeInput(1, InputValue(key=KeyInput(0, scan, 0x000A, 0, 0)))
+            self._inputs(down)
+        except (OSError, win32gui.error):
             return False
-        down = NativeInput(1, InputValue(key=KeyInput(0, scan, 0x0008, 0, 0)))
-        up = NativeInput(1, InputValue(key=KeyInput(0, scan, 0x000A, 0, 0)))
-        self._inputs(down)
         try:
             for _ in range(5):
-                if cancelled() or win32gui.GetForegroundWindow() != hwnd:
+                try:
+                    fg = win32gui.GetForegroundWindow()
+                except win32gui.error:
+                    break
+                if cancelled() or fg != hwnd:
                     break
                 sleep(.04)
         finally:
-            self._inputs(up)
+            try:
+                self._inputs(up)
+            except (OSError, win32gui.error):
+                pass
         return True
 
     def escape(self, hwnd: int) -> bool:
-        if win32gui.GetForegroundWindow() != hwnd:
-            return False
-        down = NativeInput(1, InputValue(key=KeyInput(0, 0x01, 0x0008, 0, 0)))
-        up = NativeInput(1, InputValue(key=KeyInput(0, 0x01, 0x000A, 0, 0)))
         try:
+            if win32gui.GetForegroundWindow() != hwnd:
+                return False
+            down = NativeInput(1, InputValue(key=KeyInput(0, 0x01, 0x0008, 0, 0)))
+            up = NativeInput(1, InputValue(key=KeyInput(0, 0x01, 0x000A, 0, 0)))
             self._inputs(down)
             sleep(.075)
-        finally:
             self._inputs(up)
+        except (OSError, win32gui.error):
+            try:
+                up = NativeInput(1, InputValue(key=KeyInput(0, 0x01, 0x000A, 0, 0)))
+                self._inputs(up)
+            except (OSError, win32gui.error):
+                pass
+            return False
         return True
 
 
@@ -246,11 +294,19 @@ class BackgroundControls(Controls):
                 self.held = None
 
     def direction(self, hwnd: int, requested: str | None) -> None:
-        foreground = win32gui.GetForegroundWindow() == hwnd
+        try:
+            iconic = win32gui.IsIconic(hwnd)
+        except win32gui.error:
+            self.release()
+            return
+        try:
+            foreground = win32gui.GetForegroundWindow() == hwnd
+        except win32gui.error:
+            foreground = False
         if requested == self.held and hwnd == self._held_window and foreground == self._native_arrow:
             return
         self.release()
-        if requested is None or self.held is not None or not self._game_window(hwnd) or win32gui.IsIconic(hwnd):
+        if requested is None or self.held is not None or not self._game_window(hwnd) or iconic:
             return
         if foreground:
             # Zpráva WM_KEYDOWN sama nemění stav fyzicky držené klávesy ve Windows.
@@ -267,9 +323,16 @@ class BackgroundControls(Controls):
             self._held_window = hwnd
 
     def walk(self, hwnd: int, key: str, *, cancelled: Callable[[], bool] = lambda: False) -> bool:
-        if not self._game_window(hwnd) or win32gui.IsIconic(hwnd) or cancelled():
+        try:
+            if not self._game_window(hwnd) or win32gui.IsIconic(hwnd) or cancelled():
+                return False
+        except win32gui.error:
             return False
-        if win32gui.GetForegroundWindow() == hwnd:
+        try:
+            foreground = win32gui.GetForegroundWindow() == hwnd
+        except win32gui.error:
+            foreground = False
+        if foreground:
             return super().walk(hwnd, key, cancelled=cancelled)
         scan = self._WALK_SCANS[key]
         if not self._key(hwnd, ord(key.upper()), scan, up=False):
@@ -284,10 +347,19 @@ class BackgroundControls(Controls):
         return released
 
     def escape(self, hwnd: int) -> bool:
-        if not self._game_window(hwnd) or win32gui.IsIconic(hwnd):
+        try:
+            if not self._game_window(hwnd) or win32gui.IsIconic(hwnd):
+                return False
+        except win32gui.error:
             return False
+        try:
+            foreground = win32gui.GetForegroundWindow() == hwnd
+        except win32gui.error:
+            foreground = False
+        if foreground:
+            if super().escape(hwnd):
+                return True
         if not self._key(hwnd, win32con.VK_ESCAPE, 0x01, up=False):
             return False
         sleep(.075)
         return self._key(hwnd, win32con.VK_ESCAPE, 0x01, up=True)
-

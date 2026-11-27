@@ -126,7 +126,6 @@ class GameInput(threading.Thread):
                             "width": r - l, "height": b - t, "injected": bool(item.flags & 1),
                         })
             except win32gui.error:
-                # Přesunutí nebo zavření okna mezi oběma voláními Win32 není chyba relace.
                 pass
             except Exception as exc:
                 self.error = f"Záznam kliknutí skončil. {exc}"
@@ -148,7 +147,6 @@ class GameInput(threading.Thread):
                 installs.append(hook)
             self.ready.set()
             while not self.shutdown.is_set():
-                # Vyprázdnění fronty obsluhuje i volání obou nízkoúrovňových háků.
                 while user.PeekMessageW(ctypes.byref(message), None, 0, 0, 1):
                     if message.message == 0x12:
                         return
@@ -159,4 +157,3 @@ class GameInput(threading.Thread):
             for hook in installs:
                 user.UnhookWindowsHookEx(hook)
             self.ready.set()
-

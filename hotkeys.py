@@ -11,4 +11,3 @@ class Hotkeys(GameInput):
         super().__init__("", lambda: False, lambda *_: None,
                          shortcuts={0x77: on_toggle, 0x78: on_stop}, mouse=False)
         self.name = "FishaoHotkeys"
-

@@ -66,4 +66,3 @@ class Recording:
         for name in ("events", "inputs", "markers"):
             events.extend(read_rows(self.directory / f"{name}.jsonl", optional=True))
         return sorted(events, key=lambda event: event["t_ns"])
-

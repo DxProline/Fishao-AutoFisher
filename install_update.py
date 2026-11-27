@@ -27,7 +27,9 @@ def release_version(project: Path) -> str | None:
 
 def install(project: Path, desktop: Path, patch: Path, version: str) -> Path:
     interpreter = project / ".venv" / "Scripts" / "pythonw.exe"
-    launch = project / "main.py"
+    launch = project / "application_start.py"
+    if not launch.is_file():
+        launch = project / "main.py"
     if not interpreter.is_file() or not launch.is_file():
         raise RuntimeError("Původní projekt nebo jeho Python nebyl nalezen.")
     current = release_version(project)

@@ -14,6 +14,7 @@ from typing import TextIO
 import cv2
 
 from game_input import GameInput
+from runtime_state import EventFeed
 from window import FrameUnavailable, Image, Region, WindowCapture
 
 TITLE = "FISHAO - Reborn"
@@ -49,6 +50,7 @@ class Status:
     error: bool = False
     tracking_fps: float | None = None
     preview: tuple[int, Image] | None = None
+    bot_state: str = "ready"
 
 
 def utc_now() -> str:
@@ -79,6 +81,7 @@ class Recorder(threading.Thread):
         self._inputs: queue.Queue[tuple[int, dict[str, object]]] = queue.Queue(maxsize=2048)
         self._lost_inputs = 0
         self._log = logging.getLogger("fishao")
+        self._events = EventFeed()
 
     @property
     def stopping(self) -> bool:
@@ -188,6 +191,7 @@ class Recorder(threading.Thread):
             self._manifest(folder, metadata)
             self._update(folder=folder, text="Čekám na aktivní okno hry.")
             self._log.info("Relace zahájena: %s", folder.name)
+            self._events.emit(f"Relace záznamu zahájena: {folder.name}.", key="rec_start")
             writer = threading.Thread(target=self._writer, args=(folder,), name="FishaoPngWriter", daemon=True)
             writer.start()
             with (folder / "events.jsonl").open("x", encoding="utf-8") as events, (
@@ -241,9 +245,11 @@ class Recorder(threading.Thread):
             if error:
                 message = f"Záznam ukončen kvůli chybě. {error}"
                 self._log.error("%s", message)
+                self._events.emit(message, key="rec_end", level=logging.ERROR)
             else:
                 message = f"Záznam uložen. Snímků: {stats.saved}."
                 self._log.info("%s", message)
+                self._events.emit(message, key="rec_end")
             self._stop_requested.set()
             self._update(text=message, finished=True, error=error is not None)
 
@@ -278,6 +284,7 @@ class Recorder(threading.Thread):
             self._update(text=text)
             row(events, {"type": mode, "t_ns": stamp - started, "message": text})
             self._log.info("%s", text)
+            self._events.emit(text, key="rec_state")
 
         try:
             while not self.stopping:
@@ -286,6 +293,7 @@ class Recorder(threading.Thread):
                 if monitor.error and self.snapshot().input_warning is None:
                     self._update(input_warning=monitor.error)
                     self._log.warning("%s", monitor.error)
+                    self._events.emit(f"Záznam vstupů nedostupný: {monitor.error}", key="rec_input", level=logging.WARNING)
                     row(events, {"type": "input_unavailable", "t_ns": now - started, "message": monitor.error})
                 if now >= next_disk_check:
                     self._check_disk(folder)
@@ -333,4 +341,3 @@ class Recorder(threading.Thread):
             end = perf_counter_ns()
             active = accumulated + (end - active_since if active_since is not None else 0)
             self._update(captured=captured, dropped=dropped, missed=missed, elapsed_ns=end - started, active_ns=active)
-

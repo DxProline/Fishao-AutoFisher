@@ -13,7 +13,8 @@ def create_shortcut(root: Path) -> Path:
 
     pythonw = root / ".venv" / "Scripts" / "pythonw.exe"
     icon = root / "assets" / "Tkinter.ico"
-    if not all(path.is_file() for path in (pythonw, icon, root / "main.py")):
+    launch = root / "application_start.py"
+    if not all(path.is_file() for path in (pythonw, icon, launch)):
         raise RuntimeError("Chybí spouštěcí soubor nebo ikona.")
     shell = Dispatch("WScript.Shell")
     desktop = Path(shell.SpecialFolders("Desktop"))
@@ -22,7 +23,7 @@ def create_shortcut(root: Path) -> Path:
     path = desktop / "Fishao AutoFisher.lnk"
     shortcut = shell.CreateShortcut(str(path))
     shortcut.TargetPath = str(pythonw)
-    shortcut.Arguments = subprocess.list2cmdline([str(root / "main.py"), "--autofish"])
+    shortcut.Arguments = subprocess.list2cmdline([str(launch), "--autofish"])
     shortcut.WorkingDirectory = str(root)
     shortcut.IconLocation = f"{icon},0"
     shortcut.Description = "Fishao AutoFisher"

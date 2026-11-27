@@ -20,4 +20,3 @@ class Stats:
             "Ryb za hodinu": f"{3600 * self.caught / active_s:.1f}" if active_s > 0 else "—",
             "Čas běhu": f"{seconds // 3600:02}:{seconds // 60 % 60:02}:{seconds % 60:02}",
         }
-

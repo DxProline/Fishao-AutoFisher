@@ -33,8 +33,8 @@ KEY_NAMES = {"space", "enter", "tab", "esc", "escape", "left", "right", "up", "d
              "insert", "delete"}
 
 
-def load_config() -> Config:
-    cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8-sig"))
+def load_config(path: Path = CONFIG_PATH) -> Config:
+    cfg = json.loads(path.read_text(encoding="utf-8-sig"))
     validate(cfg)
     return cfg
 
@@ -113,4 +113,3 @@ def for_run(cfg: Config) -> Config:
             if x < ax or y < ay or x + w > ax + aw or y + h > ay + ah:
                 raise ValueError(f"{STEPS[name][0]} musí ležet uvnitř oblasti minihry.")
     return deepcopy(cfg)
-

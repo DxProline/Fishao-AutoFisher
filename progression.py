@@ -8,7 +8,8 @@ import numpy as np
 
 from activities import Action
 from controls import Controls
-from game_ui import Interface, SIZE
+from game_ui import GameUI
+from runtime_state import EventFeed
 from window import Image, Region
 
 
@@ -22,9 +23,10 @@ class Supply:
 class Progression:
     """Volí ověřené akce, které pomohou pokračovat v lovu."""
 
-    def __init__(self, ui: Interface) -> None:
+    def __init__(self, ui: GameUI, *, events: EventFeed | None = None) -> None:
         self.ui = ui
         self.log = logging.getLogger("fishao")
+        self.events = events or EventFeed()
         self.goal: str | None = None
         self.previous: Action | None = None
         self.until = 0.
@@ -42,19 +44,31 @@ class Progression:
     def tick(self, image: Image, *, ready: bool, now: float, controls: Controls, region: Region,
              missing: str | None, casts: int, caught: int, escaped: int, rare_mission: bool,
              allow_farm: bool = True) -> str | None:
-        find = self.ui._find
+        find = self.ui.find
         if self.goal is None:
             if not ready:
                 return None
             if missing and now >= self.recheck_shop:
                 self.goal = missing
                 self.recheck_shop = now + 180.
+                item = "prut" if missing == "rod" else "návnada"
+                self.events.emit(f"Chybí {item} · jdu zkontrolovat nabídku v obchodě.", key="prog_goal", now=now)
             elif not self.line_tried and escaped >= 8 and escaped > caught:
                 self.goal = "line"
                 self.line_tried = True
+                self.events.emit(
+                    f"V tomto běhu uteklo {escaped} ryb (chyceno {caught}) · jdu zkontrolovat vylepšení vlasce.",
+                    key="prog_goal",
+                    now=now,
+                )
             elif allow_farm and not self.farm_tried and (casts >= 18 or rare_mission and casts >= 8) and caught * 3 < casts:
                 self.goal = "farm"
                 self.farm_tried = True
+                self.events.emit(
+                    f"Nízká úspěšnost v tomto běhu ({caught} úlovků z {casts} hodů) · zkouším přesun na Trout Farm.",
+                    key="prog_goal",
+                    now=now,
+                )
             else:
                 return None
             self.until = now + 16.
@@ -63,6 +77,15 @@ class Progression:
         if now < self.next_click:
             return "Agent čeká na změnu obrazu."
         if now >= self.until:
+            close_action = self._close(image)
+            if close_action is not None:
+                controls.click(region, *close_action.point)
+            self.events.emit(
+                f"Plánovaná akce ({self.goal}) vypršela bez dokončení · vracím se k lovu.",
+                key="prog_timeout",
+                level=logging.WARNING,
+                now=now,
+            )
             self.previous = None
             self.goal = None
             return None
@@ -110,17 +133,23 @@ class Progression:
         if action and action == previous and controls.click(region, *action.point):
             self.previous = None
             self.next_click = now + .75
-            self.log.info("Agent: %s.", action.name)
-            if action.name.startswith(("Koupit", "Vylepšit")):
+            self.log.debug("Agent: %s.", action.name)
+            if action.name.startswith("Koupit"):
                 self.purchased = True
+                self.events.emit(f"Koupil jsem {action.name.removeprefix('Koupit ')}.", key="prog_action", now=now)
+            elif action.name.startswith("Vylepšit"):
+                self.purchased = True
+                self.events.emit("Vylepšil jsem vlasec.", key="prog_action", now=now)
             elif action.name in ("Otevřít návnady", "Otevřít pruty"):
                 self.tab_requested = True
             elif action.name == "Vstoupit na Trout Farm":
                 self.awaiting_spawn = True
+                self.events.emit("Vstupuji na Trout Farm.", key="prog_action", now=now)
             elif action.name in ("Zavřít nabídku", "Dojít ke břehu farmy"):
                 self.goal = None
                 if action.name == "Dojít ke břehu farmy":
                     self.next_click = now + 2.
+                    self.events.emit("Přesouvám se ke břehu Trout Farm.", key="prog_action", now=now)
         return action.name if action else "Agent ověřuje další krok."
 
     @staticmethod
@@ -128,7 +157,7 @@ class Progression:
         return funds is not None and cost is not None and 0 < cost <= funds - reserve
 
     def _supply(self, image: Image, missing: str) -> Supply | None:
-        find = self.ui._find
+        find = self.ui.find
         wallet = find(image, "supply_cash", (862, 95, 926, 139), .90)
         if wallet is None:
             return None
@@ -145,7 +174,13 @@ class Progression:
             price = find(image, price_key, price_area, .86)
             if not price:
                 continue
-            sample = image[price.y-3:price.y+36, price.x+42:price.x+96]
+            y0 = max(0, price.y - 3)
+            y1 = min(image.shape[0], price.y + 36)
+            x0 = max(0, price.x + 42)
+            x1 = min(image.shape[1], price.x + 96)
+            sample = image[y0:y1, x0:x1]
+            if min(sample.shape[:2]) < 3:
+                continue
             cost = self.ui.number(sample, white=True)
             if cost is None:
                 larger = cv2.resize(sample, None, fx=1.25, fy=1.25, interpolation=cv2.INTER_LINEAR)
@@ -158,7 +193,7 @@ class Progression:
 
     def _icon(self, image: Image, key: str, area: tuple[int, int, int, int], offset: tuple[int, int],
               label: str) -> Action | None:
-        icon = self.ui._find(image, key, area, .87)
+        icon = self.ui.find(image, key, area, .87)
         return Action(label, icon.point(*offset)) if icon else None
 
     def _close(self, image: Image) -> Action | None:

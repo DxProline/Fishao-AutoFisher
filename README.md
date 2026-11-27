@@ -1,121 +1,122 @@
 # Fishao AutoFisher
 
-Vedle náhledu jsou živé statistiky a volby automatického lovu. Číslo verze je pod názvem aplikace.
+Automatický pomocník a záznamník pro hru **FISHAO - Reborn** na Windows 11 (64bitový Python 3.14). Vedle živého náhledu v okně GUI zobrazuje statistiky, aktuální stav stavového automatu a volby automatického lovu. Číslo verze (`1.3.0`) je zobrazeno pod názvem aplikace.
 
-Z kořene projektu lze v CMD po instalaci 64bitového Pythonu 3.14 spustit:
+---
+
+## Rychlý start přes `ApplicationStart`
+
+Veškeré spouštění aplikace je sjednoceno do veřejného vstupního bodu `ApplicationStart` (`application_start.py`), do kterého deleguje i `main.py`. Před otevřením GUI automaticky ověří pomocnou konfiguraci (`config.json`, pokud existuje), operační systém Windows, zapisovatelnost výstupní složky, volné místo na disku, požadované Python knihovny a v režimech `--autofish`, `--xp-farm` a `--agent` i přítomnost šablon `ui_reference/*.png`.
 
 ```bat
 py -3.14 setup_windows.py
 ```
 
-Skript spravuje místní prostředí `.venv` a vytvoří zástupce s ikonkou Tkinteru. Režim překrytého okna vyžaduje, aby Windows a hra poskytly obraz a přijaly vstup do okna. Při chybě režim vypni a ponech hru v popředí.
+Skript `setup_windows.py` vytvoří místní prostředí `.venv`, nainstaluje závislosti z `requirements.txt` a založí zástupce na ploše s ikonkou `assets/Tkinter.ico`.
 
-Windows 11, 64bitový CPython 3.14. Balíček obsahuje záznamník, offline přehrávač, asistenci a automat opakovaného lovu z připraveného místa u vody.
-
-## 1. Záznamník
-
-Rozbal ZIP do samostatné složky a otevři v ní PowerShell. Použít můžeš existující prostředí původního projektu:
+### Přímé spuštění z příkazové řádky (Windows PowerShell / CMD)
 
 ```powershell
-$python = 'C:\Users\jenda\PycharmProjects\PythonProject6\.venv\Scripts\python.exe'
-& $python -m pip install -r requirements.txt
+$python = '.\.venv\Scripts\python.exe'
+
+# Ověření konfigurace a prostředí před spuštěním GUI:
+& $python .\main.py --validate-only --agent
+# nebo:
+& $python -m application_start --validate-only --agent
+
+# Spuštění základního GUI (Záznamník):
 & $python .\main.py
+
+# Spuštění konkrétního režimu přes ApplicationStart:
+& $python .\main.py --assist
+& $python .\main.py --assist --test-cast
+& $python .\main.py --autofish
+& $python .\main.py --xp-farm
+& $python .\main.py --agent
 ```
 
-1. Otevři hru na jednom monitoru a v aplikaci klikni na **Začít záznam**, případně stiskni **F8** přímo ve hře.
-2. Začni několik sekund před ručním nahozením. Odehraj celý pokus a chvíli nech viditelný výsledek. Pro rozbor pomůže úspěšný a neúspěšný pokus, výběr prutu a návnady a oba směry ovládání, pokud je hra podporuje.
-3. **F8** pozastaví nebo obnoví relaci. Přepnutí z hry přeruší snímání i sběr herních vstupů. **F9** zastaví snímání a záznamník dopíše už pořízené snímky.
-4. Tlačítko **Otevřít složku** ukáže relaci v `recordings/fishao_<čas>/`. V GUI zkontroluj, že hodnota **Vstupy** po hraní roste. Případné selhání registrace Windows uvidíš v panelu **Události**.
+### Požadavky a chybějící podklady při přenosu
 
-Snímky mají původní rozlišení klientské plochy. Výchozí cíl je **60 sn./s v JPEG**. Volba `--fps` nastaví cíl mezi 1 a 120 sn./s. Volbou `--image-format png` zapneš bezeztrátové snímky. `--output-dir D:\FishaoZaznamy` změní umístění. MSS snímá viditelné pixely. Po dobu záznamu ponech okno hry bez překryvů.
+- **OS:** Windows 11 (64bitový CPython 3.14).
+- **Knihovny:** `requirements.txt` (`opencv-python`, `numpy`, `mss`, `pywin32`, `tkinter`).
+- **Povinné šablony (`ui_reference/`):** Režimy `--autofish`, `--xp-farm` a `--agent` vyžadují původní složku `ui_reference/*.png` (61 šablon pro `game_ui.Interface` a `destinations.Navigator`; volitelně také `mission_accept.png`, `mission_claim.png`, `mission_complete.png`, `mission_reward.png`). Skript `setup_windows.py` pro vytvoření zástupce navíc vyžaduje `assets/Tkinter.ico`. V přiloženém předání tyto binární soubory nebyly obsaženy — po rozbalení ZIP archivu je zkopíruj z původní instalace projektu. Pokud v adresáři chybí, `ApplicationStart` skončí srozumitelnou chybou se seznamem chybějících souborů.
 
-| Soubor | Obsah |
-| --- | --- |
-| `frames.jsonl` | Index uložených snímků, skutečné časy pořízení a rozměry okna. |
-| `inputs.jsonl` | Stisk a uvolnění kláves a tlačítek myši během aktivní relace ve hře. Kliknutí mají souřadnice od levého horního rohu klientské plochy a poměry vůči její šířce a výšce. F8 a F9 ovládají relaci. |
-| `events.jsonl` | Zahájení snímání, pauzy, čekání na okno, změny rozměru a konec. |
-| `session.json` | Stav a souhrn relace včetně počtu uložených snímků a vstupů. |
-| `logs/fishao.log` | Protokol programu ve výstupní složce nad jednotlivými relacemi. |
+---
 
-JSONL ukládá jeden objekt JSON na řádek. `t_ns` je počet nanosekund od začátku relace. Volitelný `markers.jsonl` může obsahovat vlastní poznámky ve stejném čase, třeba `{"t_ns":6500000000,"type":"poznámka","label":"tady jsem nahodil"}`.
+## Konfigurace, zastavení a protokoly (logy)
 
-## 2. Kontaktní list a offline přehrávač
+- **Konfigurace:** `config.json` (validovaný modulem `config.py`) je zachován jako pomocná/původní konfigurace kontrolovaná při startu `ApplicationStart`. Samotný živý běh `Auto` a `Assist` používá normalizované souřadnice `1264x681` v `game_ui.Interface` a parametry příkazové řádky (`--output-dir`, `--fps 1..120`, `--image-format jpg|png`, `--max-casts 1..500`).
+- **Pozastavení a bezpečné zastavení:**
+  - **F8** (nebo tlačítko v GUI) relaci spustí či pozastaví (`PAUSED_MANUAL`).
+  - **F9** (nebo zavření okna aplikace) bezpečně ukončí pracovní vlákno, uvolní všechny držené klávesy i tlačítka myši (`Controls.release()`) a zavře handlery protokolu.
+- **Strukturované logování a panel Události:**
+  - **Panel `Události` v GUI (`fishao.events`):** zobrazuje pouze srozumitelný časový přehled významných událostí v češtině (místní čas `HH:MM:SS`), např. otevření a procházení stránek misí, kliknutí na přijetí/odměnu s následným potvrzením výsledku, potvrzení dialogu nové úrovně, chyby včetně důvodu a obnovení lovu. Opakované identické snímky se neopakují.
+  - **Technická diagnostika (`fishao` -> `<output-dir>/runtime/logs/fishao.log` a konzole):** je oddělená od uživatelského panelu Události a obsahuje podrobné záznamy přechodů stavového automatu (`ts=<lokální-ISO> | cid=<id_relace> | state=<BotState> | action=<akce> | result=<výsledek> | retry=<pokus> | reason='...'`), OCR výpisy karet misí a ladicí kroky. Časové razítko `ts=` i `%(asctime)s` používá shodný místní čas a filtr `DuplicateLogFilter` potlačuje opakované identické `INFO`/`DEBUG` řádky (bez potlačení přechodů `state=`, `WARNING` či `ERROR`). Logy neobsahují citlivé údaje ani surové snímky obrazovky.
 
-Dosazuj cestu ke konkrétní relaci z tlačítka **Otevřít složku**:
+### Co znamená „učení“ agenta (bez mezi-relační paměti)
+- **Mezi jednotlivými spuštěními se agent neučí:** aplikace neukládá na disk žádné zkušenosti, váhy ani naučené strategie pro příští spuštění. Při startu na to panel Události výslovně upozorňuje.
+- **V rámci jednoho spuštění** využívá pouze krátkodobou paměť a stavové heuristiky:
+  - `Cycle.score` (`+2` za úlovek, `-1` za útěk) a `Cycle.preferred()` v `bot.py` upřednostňují ověřeně úspěšná místa nahození z aktuálního běhu;
+  - `Cycle.rejected` dočasně vyřadí až 6 bodů, kde se nahození nepotvrdilo;
+  - `Progression` (`progression.py`) na základě statistik aktuálního běhu (`casts`, `caught`, `escaped`) rozhoduje o návnadě, vlasci, přesunu na jinou oblast nebo Trout Farm.
 
+---
+
+## Oprava spolehlivosti a známá omezení OS Windows
+
+### Uzamčení počítače (`Win + L`), spořič obrazovky a běh v překrytém okně
+- **Prevence spořiče obrazovky a uspání při AFK (`Bránit spořiči a uspání obrazovky`):** Během aktivního lovu (pokud není ručně pozastaven nebo vypnut) volá automat Win32 API `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED)`, aby Windows po 15–20 minutách bez fyzické aktivity nespustil spořič obrazovky, nevypnul monitor ani PC nezamkl z nečinnosti. Při pauze (**F8**) nebo zastavení (**F9**) se nastavení okamžitě vrátí na `ES_CONTINUOUS`.
+- **Co když se PC přesto zamkne (`Win + L` nebo vynucený zámek systému):**
+  - Na uzamčené pracovní stanici Windows (`WinSta0\Winlogon`) operační systém z bezpečnostních důvodů blokuje `SendInput`, `GetCursorPos` i běžné snímání popředí (`mss`). Aplikace toto omezení neobchází nelegálními zásahy, ale v režimu `Auto` (`continuous=True`) automaticky vyzkouší záložní čtení okna na pozadí (`WindowCapture.grab_locked_background` přes `BitBlt` / `PrintWindow`) a zprávy oknu (`BackgroundControls` přes `PostMessage`).
+  - Pokud Windows a klient `FISHAO - Reborn` při spořiči nebo zámku stále vykreslují obraz okna (`PrintWindow`) a přijímají `PostMessage`, **agent pokračuje v lovu na pozadí bez přerušení i bez vypnutí**.
+  - Pokud Windows na zamčené ploše z bezpečnostních důvodů či kvůli GPU vrací pouze prázdné/černé snímky (`not image.any()`), aplikace bezpečně uvolní klávesy, vyčká ve stavu **`PAUSED_LOCKED`** (bez vyčerpání rozpočtu chyb a **bez ukončení agenta**) a po probuzení či odemčení lov automaticky obnoví.
+  - Výjimky `SendInput`, `GetCursorPos`, `GetForegroundWindow` a `IsIconic` v `controls.py` jsou zachyceny tak, aby neukončily vlákno asistenta ani při přepnutí plochy.
+- **Režim překrytého okna (`Lovit v překrytém okně`):** Snímá okno přes `BitBlt` / `PrintWindow` a posílá zprávy `PostMessage` bez nutnosti popředí. Závisí na tom, zda Windows a spuštěný klient `FISHAO - Reborn` zprávy na pozadí přijímají. Při minimalizaci okna hra neposkytuje obraz a automat bezpečně vyčká (`RECOVERING`).
+
+### Nepřetržitý AFK grind, timeouty a automatické potvrzování dialogů (`OK` / `Collect` / `Claim`)
+- **Nepřetržitý AFK provoz (`continuous=True`):** `Auto` (`AutoFish`, `XP Farm`, `Agent`) se při přechodných výpadcích nebo opakovaných limitech (`Phase.CAST`, `Phase.WAIT` při ztrátě HUD, `Phase.RESULT`, `Phase.CLOSE`, `Phase.GEAR`, `Phase.REFILL`, `UNKNOWN_SCREEN` i opakovaných chybách mapy v `Navigator._map`) sám bezpečně zotaví (`_afk_cooldown_recovery`, pauza 5 s, uvolnění vstupů, `Escape`, reset čítače chyb a návrat k `Phase.READY`) a **pokračuje v lovu bez zastavení**, dokud jej ručně neukončíš (**F9** / tlačítko *Zastavit*, případně explicitní limit `--max-casts`). Pokud dojde k neočekávané výjimce v pracovním vlákně s `continuous=True`, `Assist.run()` smyčku rovněž restartuje.
+- **Okamžité potvrzení modálních dialogů (`OK` / `Collect` / `Claim` / `Accept`):** Před každým dalším krokem ve smyčce volá `Auto._modal_dialog()`:
+  - Rozpozná dialog nové úrovně (`ui.level_ok`) se zeleným `OK` a tolerancí odlesků.
+  - Rozpozná také samostatná modální okna misí, odměn a hlášení (včetně obrazovek typu *„WOW, YOU'RE FAST!“* s oranžovým tlačítkem `Collect`, `Claim` i zelenými `OK`/`Accept` tlačítky uvnitř světlé karty v `Interface.mission_popup_action` / `find_action_button`) i bez dodatečných PNG šablon.
+  - Potvrzuje okamžitě přes `LevelDialogController` (2 po sobě jdoucí snímky, prodleva mezi kliky, záložní `Escape`, bez zastavení smyčky lovu). Úspěšné zavření dialogu zapíše do Událostí až poté, co okno skutečně zmizí.
+- **Mise (`Activities` + `MissionTracker`):** Detekuje nabídnuté mise, potvrzuje přijetí (`accept`), sleduje podmínky a průběh, vyzvedává odměny (`claim`/`collect`/`reward`) jak na kartě mise (zelené i oranžové tlačítko), tak ve vyskakovacích oknech, a stav `COMPLETED` i zprávu v Událostech zapíše teprve po ověření výsledku. Chvilkový 1-snímkový přechod zavírání okna nezpůsobí předčasné selhání stavu.
+
+---
+
+## Režimy aplikace
+
+### 1. Záznamník (`python main.py`)
+1. Otevři hru na jednom monitoru a v aplikaci klikni na **Začít záznam** (nebo stiskni **F8**).
+2. Hraj ručně; **F8** pozastaví nebo obnoví relaci, **F9** ji ukončí a dopíše soubory do `recordings/fishao_<čas>/` (`frames.jsonl`, `inputs.jsonl`, `events.jsonl`, `session.json`).
+
+### 2. Kontaktní list a offline přehrávač
 ```powershell
 $relace = '.\recordings\fishao_2026-11-18_22-45-00-000000'
 & $python .\contacts.py $relace
 & $python .\replay.py $relace --output .\rozbor.jsonl
 ```
+Kontaktní list otevři z `kontakty/index.html` uvnitř složky relace.
 
-Kontaktní list otevři z `kontakty/index.html` uvnitř relace. Každý řádek ukazuje pět snímků v rozsahu od 0,4 s před událostí do 0,4 s po ní, s vyznačením kliknutí u prostředního snímku. Ukazuje i mezery, v nichž chybí dostatečně blízký snímek. Opakovaný export ukládej pomocí `--output-dir` do nové složky.
+### 3. Živá asistence jedné minihry (`--assist` / `--assist --test-cast`)
+Spusť asistenci přes **F8** a nahoď. Po rozpoznání lišty minihry `YOU HAVE A BITE!` vyvažuje ukazatel šipkami až do 120 Hz. Režim `--test-cast` provede jeden zkušební hod v kruhu dosahu a skončí.
 
-Offline přehrávač analyzuje stabilitu scény, sledované oblasti, jejich posuny, nově objevené oblasti a vizuální kandidáty na vodu. U lišty `YOU HAVE A BITE!` vypíše pozici dvojice modrých šipek, zelený střed a rozhodnutí o držení nebo uvolnění klávesy. Souřadnice jsou poměry 0–1. Volba `--changes-only` zmenší výpis na přechody, změny směru a snímky s událostmi. Herní stavy, ke kterým zatím chybí záběry, se označují `unknown`.
+### 4. AutoFish, XP Farm a Agent (`--autofish`, `--xp-farm`, `--agent`)
+- Postav postavu k vodě, připrav prut a návnadu a zavři cizí okna ve hře.
+- **AutoFish** opakovaně hledá vodu v kruhu dosahu, nahazuje, vyvažuje minihru a zavírá výsledek.
+- **XP Farm** při nulové energii čeká na dobití a na placené Trout Farm umí využít ověřenou nabídku energie (s rezervou bankovek).
+- **Agent** zapíná **Mise, postup a vybavení**, kontroluje karty misí (přijetí / sledování / vyzvednutí), doplňuje prut/návnadu z inventáře či obchodu, při nízkém výkonu mění oblast, a při volbě **Účastnit se turnajů** se může hlásit do herních turnajů.
+- Na kartě **Lovná místa** lze vybrat Laketown, vlastní uložený břeh i bezplatný chléb u Jamieho v pekárně.
 
-## 3. Živá asistence jedné minihry
+---
 
+## Řešení potíží a testování
+
+- **Chybí `ui_reference/*.png`:** Ověř kompletnost instalační složky pomocí `python main.py --validate-only --agent`.
+- **Hra na pozadí nereaguje na kliknutí:** Vypni volbu *Lovit v překrytém okně* a ponech `FISHAO - Reborn` v popředí se stejnými oprávněními Windows jako má automat.
+- **Automat se zastavil s `ERROR_STOPPED`:** Zkontroluj `recordings/runtime/logs/fishao.log` podle posledního záznamu `cid=` a `reason=`.
+
+### Spuštění testů (na Windows se všemi závislostmi)
 ```powershell
-& $python .\main.py --assist
+& $python -B -m unittest -v
 ```
-
-Spusť asistenci přes **F8** a ručně nahoď. Po rozpoznání lišty aplikace drží opačnou šipku podle vychýlení a rychlosti ukazatele. Uprostřed ji uvolní, pokud tam ukazatel zůstává. Jakmile lištu najde, snímá výřez kolem ní s cílem až 120 vzorků za sekundu. Skutečnou rychlost měří GUI. Ztratí-li lištu nebo fokus, uvolní vstup. **F8** je pauza, **F9** konec. Po zmizení lišty zkontroluj výsledek a zavři jej klávesou Esc.
-
-Ukazatel **Detekce sn./s** měří frekvenci úspěšného rozpoznání tečky. **Náhled sn./s** uvádí rychlost aktualizace obrázku v aplikaci s cílem 60 sn./s během minihry. Skutečná frekvence závisí na rychlosti hry, snímání a počítače. Po ojedinělém výpadku rozpoznání zůstává snímání ve výřezu lišty, aby se tečka rychle znovu zachytila.
-
-Volitelný režim jednoho zkušebního hodu:
-
-```powershell
-& $python .\main.py --assist --test-cast
-```
-
-Před startem postav postavu u vody, zobraz kruh dosahu a ověř energii, prut a návnadu. Aplikace zkusí jeden hod dvěma rychlými kliky, pokud na dvou snímcích najde podobný bod ve vodě uvnitř kruhu. Pro hledání bodu, čekání na záběr a minihru má oddělené limity. Po jednom pokusu se relace ukončí.
-
-## 4. AutoFish
-
-```powershell
-& $python .\main.py --autofish
-```
-
-1. Postav postavu k vodě, připrav prut a návnadu a zobraz kruh dosahu. Zavři otevřené nabídky a staré výsledky.
-2. Spusť automat tlačítkem nebo **F8**. Okno hry ponech v popředí. **F8** pozastaví práci a **F9** ukončí relaci.
-3. AutoFish potvrdí hod z obrazu, vyčká na záběr, vyváží minihru a zavře rozpoznaný výsledek přes Esc. Pro další hod změří aktuální kruh dosahu kolem postavy s fialovou čepicí. Klikne jen do souvislé vody na straně od břehu, s odstupem od okraje kruhu. Střed, poloměr i bod musí potvrdit dva snímky. Při nejasném kruhu nebo břehu vyčká. Při nulové energii čeká na zvýšení čítače. Vyčerpanou výbavu zkusí doplnit.
-4. AutoFish běží do ručního vypnutí pomocí **F9**. Šedé spodní ikony nebo šedá záhlaví prutu a návnady znamenají čekání. Po návratu barev obou lišt může přijít další hod, i když předchozí skončil bez úlovku.
-
-### XP Farm
-
-```powershell
-& $python .\main.py --xp-farm
-```
-
-Při nulové energii automat počká na přirozené dobití. **F8** spustí nebo pozastaví lov a **F9** ho ukončí. Při ztrátě fokusu nebo nečitelném stavu hry automat čeká a průběžně kontroluje obraz.
-
-Na rozpoznané placené Trout Farm agent upřednostňuje rybaření. Při nulové energii může jednou za návštěvu zkusit ověřenou nabídku 5 energie za 35 bankovek, pokud zelená část odpočtu ještě stačí, vybavení vystačí na pět hodů a po nákupu zůstane nejméně 100 bankovek. Vstup do placené části je potřeba zařídit ve hře.
-
-### Agent
-
-```powershell
-& $python .\main.py --agent
-```
-
-Před spuštěním lovu zapni **Mise, postup a vybavení**. Příkaz `--agent` tuto volbu předvybere. Rozpoznaná mise na čtyřhvězdičkovou rybu zkracuje dobu před porovnáním výsledků na stávajícím místě. Při chybějícím prutu nebo návnadě nejdřív projde inventář a teprve potom hledá ověřenou nabídku v obchodě. Porovnává ceny prutů a drží rezervu 30 bankovek. Při opakovaném úniku ryb prověří vlasec a po případném upgradu ponechá rezervu 5 mincí.
-
-Volba **Účastnit se turnajů** je při otevření aplikace vypnutá. Zaškrtni ji před spuštěním lovu, pokud chceš turnaje vyhledávat a hlásit se za herní mince. Agent turnaje kontroluje nejvýše jednou za pět minut. Při neověřené registraci zavře panel a vrátí se k lovu. Pro změnu volby během lovu zastav agenta klávesou F9 a po změně ho znovu spusť.
-
-Při lovu se bod vybírá z vody uvnitř aktuálního kruhu prutu. Když hra hod nepotvrdí, automat zkusí další rozpoznaný bod. Při nejistém dosahu přejíždí kurzorem nad vodou a čeká na potvrzený kruh. AutoFish a agent drží průběžný náhled v paměti. Základní režim záznamníku je určený pro ruční ukládání snímků.
-
-Pokud je postava dál od rozpoznané vody, agent může udělat krátký krok po souši k břehu a pak znovu změřit dosah prutu. Po záběru ukazuje průběh minihry v hlavním okně a její začátek zapisuje do událostí. Číslo aktuální verze je v levém horním rohu.
-
-Agent pracuje s ověřenými obrazovkami hry. Další typy misí, samostatné obchodování s úlovky a úkony kolem domu zatím vyžadují hráče.
-
-### Hra v překrytém okně
-
-Před spuštěním zaškrtni **Lovit v překrytém okně**. Fishao nech otevřené a překryj jej prohlížečem nebo jiným oknem. Tento režim snímá klientskou plochu Fishao a předává kliknutí a šipky přímo hře. Skutečná myš zůstává volná. Při minimalizaci Fishao automat počká na obnovení okna. Režim závisí na tom, zda spuštěná hra přijímá zprávy o vstupu na pozadí. Pokud přímý vstup selže, můžeš po zastavení zvolit běžný režim.
-
-Na kartě **Lovná místa** vyber aktuální místo, rybník u pekárny v Laketownu nebo vlastní uložený břeh. Při přidání místa použij snímky klientské plochy hry bez titulku a rámečku. Vyber značku oblasti na světové mapě a výrazný bod na suchém břehu, který je po příchodu do oblasti vidět. Pro rybníky ve stejné oblasti použij stejný název mapy. Vybranou mapu načte na začátku lovu a zůstane na ní. Když po příchodu nevidí uložený břeh, hledá přístup k vodě ve stejné oblasti. Volitelné střídání břehů vybírá jen uložené body, které aplikace právě vidí na téže mapě.
-
-Volba **Vyzvednout bezplatný chléb u Jamieho** spouští cestu po vyčerpání návnady. Je-li pekárna vidět v aktuální oblasti, má přednost před nákupem. Jinde zůstává k dispozici inventář a obvyklý nákup v režimu agenta. Nabídku potvrdí až po rozpoznání Jamieho dialogu, počká na potvrzení přijetí návnady, zavře dialog a vrátí se k vybranému břehu. Teprve u vody otevře inventář a vybere chléb. Při aktivním odpočtu v Trout Farm zůstává v místě a použije zásoby z inventáře.
-
-Hra a automat musí mít stejnou úroveň oprávnění Windows. Průchod AutoFish, minihra i přihlášení na základě referencí se testují simulací. Probíhající hod může skončit i bez úlovku. AutoFish se řídí stavem hry a při nejasném obraze vyčkává.
-
-Testy balíčku spusť příkazem `& $python -B -m unittest -v`.
+Podrobný přehled spuštěných vs. nespuštěných testů je v souboru [`TEST_REPORT.md`](./TEST_REPORT.md).

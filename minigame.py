@@ -65,8 +65,6 @@ class BalanceDetector:
             x, y, w, h = cv2.boundingRect(contour)
             if w < 62 or h < 7 or not 5 <= w / h <= 15 or cv2.contourArea(contour) < w * h * 0.78:
                 continue
-            # Modrý hrot může při rychlém pohybu překrýt jeden kontrolní bod.
-            # Ověř barvy na ploše několika řádků a v pásmech celé lišty.
             rows = hsv[y + h // 4 : y + 3 * h // 4 + 1, x : x + w]
             hue, saturation, value = cv2.split(rows)
             vivid = (saturation >= 145) & (value >= 120)
@@ -117,8 +115,6 @@ class BalanceDetector:
             distance, center = min(pairs)
             if distance <= max(3, h * 0.22):
                 return center
-        # Na ověřené liště lze začít i s jediným hrotem. Jeho barva musí
-        # zasahovat přímo dovnitř lišty, aby se nebral modrý prvek z okolí.
         if len(a) == 1 and not b:
             center = a[0]
             inside = upper[top_border:]
@@ -155,10 +151,8 @@ class BalancePolicy:
         else:
             self.velocity = 0.
         self.last_stamp, self.last_error = stamp, error
-        # Předvídej směr v nejbližších milisekundách, aby korekce přišla dřív.
         correction = max(-.095, min(.095, .045 * self.velocity))
         predicted = error + correction
-        # Daleko od středu nejdřív zmenši skutečné vychýlení.
         if abs(error) >= .12 and error * predicted < 0:
             predicted = error
         pixel = 1 / state.bar[2]
@@ -170,4 +164,3 @@ class BalancePolicy:
         else:
             self.held = None
         return self.held
-

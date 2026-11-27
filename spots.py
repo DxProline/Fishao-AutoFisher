@@ -55,7 +55,6 @@ def paid_pond(hsv: Image) -> np.ndarray:
 def _water_surfaces(candidate: Image, seeds: Image) -> np.ndarray:
     kernel = np.ones((7, 7), np.uint8)
     water = cv2.morphologyEx(candidate, cv2.MORPH_OPEN, kernel)
-    # Světlý kruh může rozdělit vodní plochu. Spojení slouží jen k označení plochy.
     joined = cv2.morphologyEx(water, cv2.MORPH_CLOSE, kernel)
     count, labels, stats, _ = cv2.connectedComponentsWithStats(joined)
     minimum = water.size * .024
@@ -66,13 +65,10 @@ def _water_surfaces(candidate: Image, seeds: Image) -> np.ndarray:
 
 
 def _open_water(hsv: Image) -> np.ndarray:
-    # Noční filtr barví i písek do modra, ale moře má v záznamu vyšší sytost.
     sea = cv2.inRange(hsv, (76, 54, 75), (95, 255, 255))
     deep_sea = cv2.inRange(hsv, (96, 86, 75), (124, 255, 255))
     shallow = cv2.inRange(hsv, (47, 16, 145), (95, 92, 255))
     blue = cv2.bitwise_or(sea, deep_sea)
-    # Tyrkysová řeka může mít u břehu sytější zelenomodrý přechod.
-    # Připoj jen hladké části navazující na větší plochu se spolehlivým odstínem vody.
     river_edge = cv2.inRange(hsv, (63, 85, 120), (83, 255, 255))
     if cv2.countNonZero(river_edge):
         change = cv2.morphologyEx(hsv[:, :, 2], cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
@@ -80,8 +76,6 @@ def _open_water(hsv: Image) -> np.ndarray:
         shallow = cv2.bitwise_or(shallow, river_edge)
     water = _water_surfaces(cv2.bitwise_or(blue, shallow), blue)
 
-    # Pstruží rybník má olivový odstín a jednotný povrch. Při podobné
-    # barvě pomáhají odlišit trávu a dřevo sytost a místní změny jasu.
     olive = cv2.inRange(hsv, OLIVE_LOW, OLIVE_HIGH)
     if cv2.countNonZero(olive) >= olive.size * .024 and _trout_layout(hsv):
         change = cv2.morphologyEx(hsv[:, :, 2], cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
@@ -122,11 +116,11 @@ def _circles(gray: np.ndarray, avatars: list[tuple[float, float, int, int]]) -> 
         best = None
         land_centers = [(ax + dx * hat_w, ay + dy * hat_h, 0)
                         for dx in (-.14, 0., .14) for dy in (.6, .8, 1., 1.2, 1.4, 1.6)]
-        # U otočené postavy může maska pokrývat jen část čepice. Pro velký
-        # kruh proto ověř i posunuté středy, kde vychází skutečné nohy.
         large_centers = [(ax + dx * hat_w, ay + dy * hat_h, large_start)
                          for dx in (-.40, 0., .40) for dy in (1.8, 2.2, 2.6, 3.0)]
         for cx, cy, start in land_centers + large_centers:
+            if start + 15 >= len(radii):
+                continue
             tested_radii = radii[start + 7:-7]
             mx, my = ray_x[start:] + cx, ray_y[start:] + cy
             values = cv2.remap(gray, mx.astype(np.float32), my.astype(np.float32), cv2.INTER_LINEAR).astype(np.float32)
@@ -138,11 +132,8 @@ def _circles(gray: np.ndarray, avatars: list[tuple[float, float, int, int]]) -> 
             visible = valid.sum(axis=1)
             support = hits.sum(axis=1) / np.maximum(1, visible)
             strength = np.minimum(contrast, 14).clip(0) * hits
-            # Malé světlé oblouky mezi nohama a rukama nejsou kruh prutu.
             plausible_radius = tested_radii >= 1.35 * hat_h
             enough_sectors = (sectors >= 3) & (visible >= 40) & (support >= .30)
-            # Velký kruh může z okna vyčnívat nahoře i dole. Pak stačí
-            # dva protilehlé oblouky téhož kruhu, každý s vlastní oporou.
             enough_arcs = np.zeros_like(enough_sectors)
             for (positive, negative), span in zip(
                     opposing_sides, (max(cy, height - cy), max(cx, width - cx))):
@@ -167,11 +158,10 @@ def _circles(gray: np.ndarray, avatars: list[tuple[float, float, int, int]]) -> 
 def _rim_over_water(gray: Image, water: np.ndarray, cx: float, cy: float, radius: float) -> bool:
     """Ověří světlejší oblouk mezi dvěma vzorky hladiny na stejném paprsku."""
     angles = np.linspace(0, 2 * np.pi, 96, endpoint=False, dtype=np.float32)
-    radii = np.array([radius - 7, radius, radius + 7], dtype=np.float32)[:, None]
+    radii = np.array([max(1.0, radius - 7), radius, radius + 7], dtype=np.float32)[:, None]
     mx, my = cx + radii * np.cos(angles), cy + radii * np.sin(angles)
     brightness = cv2.remap(gray, mx, my, cv2.INTER_LINEAR).astype(np.int16)
     wet = cv2.remap(water.astype(np.uint8), mx, my, cv2.INTER_NEAREST)
-    # Plot, břeh a cedule mohou vytvořit zdánlivý kruh. Hledáme část obrysu nad vodou.
     wet_sides = (wet[0] != 0) & (wet[2] != 0)
     highlights = brightness[1] - np.maximum(brightness[0], brightness[2]) >= 3
     hits = np.count_nonzero(wet_sides & highlights)
@@ -181,7 +171,7 @@ def _rim_over_water(gray: Image, water: np.ndarray, cx: float, cy: float, radius
 def _scene(image: Image) -> Image:
     h0, w0 = image.shape[:2]
     scale = min(1.0, 900 / max(h0, w0))
-    return cv2.resize(image, (round(w0 * scale), round(h0 * scale)), interpolation=cv2.INTER_AREA)
+    return cv2.resize(image, (max(1, round(w0 * scale)), max(1, round(h0 * scale))), interpolation=cv2.INTER_AREA)
 
 
 def _avatars(hsv: Image) -> list[tuple[float, float, int, int]]:
@@ -198,7 +188,6 @@ def _avatars(hsv: Image) -> list[tuple[float, float, int, int]]:
 
 
 def _castable_view(width: int, height: int) -> np.ndarray:
-    # Úzké okraje a spodní lišta mohou mít stejnou barvu jako voda.
     yy, xx = np.ogrid[:height, :width]
     return ((xx >= .06 * width) & (xx < .90 * width) & (yy >= .10 * height)
             & (yy < .96 * height)
@@ -210,7 +199,6 @@ def _shore_avatars(hsv: Image) -> list[tuple[float, float, int, int]]:
     if len(avatars) <= 1:
         return avatars
     height, width = hsv.shape[:2]
-    # V tažené kameře je hráč u středu. Malé fialové květy a HUD ignoruj.
     central = [a for a in avatars if .32 * width <= a[0] <= .68 * width
                and .25 * height <= a[1] <= .72 * height and a[3] >= .032 * height]
     return central or avatars
@@ -257,11 +245,12 @@ def avatar_feet(image: Image, near: Point) -> Point | None:
     if len(avatars) != 1:
         return None
     x, y, _, hat = avatars[0]
-    sx, sy = round(near[0] * width), round(near[1] * height)
+    sx = min(width - 1, max(0, round(near[0] * width)))
+    sy = min(height - 1, max(0, round(near[1] * height)))
     water = _open_water(hsv)
     if not (2 <= sx < width - 2 and 2 <= sy < height - 2) or water[sy-2:sy+3, sx-2:sx+3].any():
         return None
-    return x / width, (y + 1.25 * hat) / height
+    return x / width, min(height - 1.0, y + 1.25 * hat) / height
 
 
 def walking_direction(image: Image, target: Point) -> str | None:
@@ -273,7 +262,8 @@ def walking_direction(image: Image, target: Point) -> str | None:
     if len(avatars) != 1:
         return None
     x, y, _, hat = avatars[0]
-    x, y = round(x), round(y + 1.25 * hat)
+    x = min(width - 1, max(0, round(x)))
+    y = min(height - 1, max(0, round(y + 1.25 * hat)))
     dx, dy = target[0] * width - x, target[1] * height - y
     water = _open_water(hsv)
     walkable = _castable_view(width, height) & ~water
@@ -311,7 +301,6 @@ def shore_approach(image: Image, *, max_distance_hats: float = 12) -> Point | No
     length = float(np.linalg.norm(direction))
     if not .85 * hat < length <= max_distance_hats * hat:
         return None
-    # Zastav na suché straně hranice, i když je u břehu jen úzký pás vody.
     path = np.rint(np.linspace(feet, feet + direction, max(2, round(length)))).astype(int)
     if not ((0 <= path[:, 0]).all() and (path[:, 0] < width).all()
             and (0 <= path[:, 1]).all() and (path[:, 1] < height).all()):
@@ -322,10 +311,12 @@ def shore_approach(image: Image, *, max_distance_hats: float = 12) -> Point | No
     step = min(round(4 * hat), int(wet[0]) - max(3, round(hat * .20)))
     if step < .65 * hat:
         return None
-    sx, sy = path[step]
+    sx, sy = int(path[step][0]), int(path[step][1])
+    if not (2 <= sx < width - 2 and 2 <= sy < height - 2):
+        return None
     if not world[sy, sx] or water[sy-2:sy+3, sx-2:sx+3].any():
         return None
-    return int(sx) / width, int(sy) / height
+    return sx / width, sy / height
 
 
 def casting_target(image: Image, preferred: Point | None = None, avoid: Point | None = None,
@@ -343,20 +334,18 @@ def casting_target(image: Image, preferred: Point | None = None, avoid: Point | 
     circles = _circles(raw_gray, avatars)
     if not circles:
         return None
-    # Při dvou podobně silných kruzích nemáme jistotu, která postava je naše.
     score, cx, cy, radius = circles[0]
     if len(circles) > 1 and circles[1][0] >= score - .10:
         return None
     water = _open_water(hsv) & _castable_view(width, height)
     yy, xx = np.ogrid[:height, :width]
+
     def choose_point() -> Point | None:
         dx, dy = xx - cx, yy - cy
         range_sq = dx ** 2 + dy ** 2
         survey = range_sq <= (radius * 1.12) ** 2
         area = np.count_nonzero(survey)
         available = (survey & water).astype(np.uint8)
-        # Na molu může být voda na obou stranách. Vybereme jen nejbližší
-        # dostatečně velkou souvislou plochu, pokud strany nejsou stejně blízko.
         count, labels, stats, _ = cv2.connectedComponentsWithStats(available)
         candidates = []
         for label in range(1, count):
@@ -368,7 +357,6 @@ def casting_target(image: Image, preferred: Point | None = None, avoid: Point | 
             return None
         surface = candidates[0][1]
         ys, xs = np.nonzero(surface)
-        # Osa vede od postavy k převaze souvislé vody. Za její zadní polorovinu se nekliká.
         vx, vy = float(xs.mean() - cx), float(ys.mean() - cy)
         length = float(np.hypot(vx, vy))
         if length < radius * .24:
@@ -392,9 +380,9 @@ def casting_target(image: Image, preferred: Point | None = None, avoid: Point | 
                     distance = other
                     deep, (x, y) = strength, alternate
             if preferred:
-                sx = min(width-1, max(0, round(preferred[0]*width)))
-                sy = min(height-1, max(0, round(preferred[1]*height)))
-                if distance[sy,sx] >= margin:
+                sx = min(width - 1, max(0, round(preferred[0] * width)))
+                sy = min(height - 1, max(0, round(preferred[1] * height)))
+                if distance[sy, sx] >= margin:
                     return sx / width, sy / height
             return x / width, y / height
         return None
@@ -402,7 +390,9 @@ def casting_target(image: Image, preferred: Point | None = None, avoid: Point | 
     point = choose_point()
     if point is None:
         return None
-    hue = hsv[round(point[1] * height), round(point[0] * width), 0]
+    py = min(height - 1, max(0, round(point[1] * height)))
+    px = min(width - 1, max(0, round(point[0] * width)))
+    hue = hsv[py, px, 0]
     if OLIVE_LOW[0] <= hue <= OLIVE_HIGH[0] and not _rim_over_water(raw_gray, water, cx, cy, radius):
         return None
     return CastTarget(point, (cx / width, cy / height), radius / width, height / width)
@@ -425,7 +415,6 @@ def water_candidates(image: Image) -> list[dict[str, object]]:
         ratio = cv2.contourArea(contour) / area
         if ratio < 0.025:
             break
-        # Maximum vzdálenosti od okraje dává bod uvnitř skutečné masky.
         region = np.zeros((height, width), dtype=np.uint8)
         cv2.drawContours(region, [contour], -1, 255, thickness=cv2.FILLED)
         region = cv2.bitwise_and(water, region)
@@ -441,4 +430,3 @@ def water_candidates(image: Image) -> list[dict[str, object]]:
             "area_ratio": round(ratio, 4),
         })
     return results
-

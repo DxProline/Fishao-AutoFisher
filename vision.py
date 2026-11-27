@@ -70,7 +70,6 @@ class VisualDetector:
         if self.background is None or interrupted or state == "scene_change":
             self.background = smooth.astype(np.float32)
         else:
-            # Druhé srovnání drží několik sekund i oblast, která se právě objevila a stojí.
             residual = self._change_mask(smooth, cv2.convertScaleAbs(self.background))
             contours, _ = cv2.findContours(residual, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:5]:
@@ -114,4 +113,3 @@ class VisualDetector:
             })
         self.tracks = current
         return regions
-

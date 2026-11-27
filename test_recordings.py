@@ -230,7 +230,7 @@ class RecordedWorkflow(unittest.TestCase):
         scene = np.full((550, 680, 3), (31, 40, 237), np.uint8)
         scene[:140] = (86, 83, 235)
         scene[140:247] = (58, 32, 230)
-        scene[350:490, 230:360] = (58, 32, 230)  # izolovaná barevná plocha na souši
+        scene[350:490, 230:360] = (58, 32, 230)
         scene = cv2.cvtColor(scene, cv2.COLOR_HSV2BGR)
         cv2.ellipse(scene, (305, 224), (15, 14), 0, 0, 360, (170, 50, 105), -1)
         self.assertIsNone(casting_target(scene))
@@ -238,7 +238,7 @@ class RecordedWorkflow(unittest.TestCase):
         self.assertIsNotNone(hover)
         self.assertLess(hover[1] * 550, 247)
         cv2.circle(scene, (305, 254), 152, (248, 250, 250), 3, cv2.LINE_AA)
-        target = casting_target(scene, preferred=(.44,.70))
+        target = casting_target(scene, preferred=(.44, .70))
         self.assertIsNotNone(target)
         self.assertLess(target.point[1] * 550, 247)
 
@@ -274,7 +274,6 @@ class RecordedWorkflow(unittest.TestCase):
         center, radius = (450, 240), 147
         hsv = np.full((height, width, 3), (41, 248, 167), np.uint8)
         hsv[:pond_end, 240:675] = (28, 150, 130)
-        # Pruh stejného odstínu na souši bez jednolitého povrchu.
         hsv[300:, :, :2] = (28, 150)
         hsv[300:, ::2, 2] = 109
         hsv[300:, 1::2, 2] = 171
@@ -299,7 +298,7 @@ class RecordedWorkflow(unittest.TestCase):
         hsv = np.full((height, width, 3), (46, 213, 130), np.uint8)
         hsv[:, river_start:river_end] = (89, 211, 155)
         hsv[:, river_start:535] = (70, 160, 207)
-        hsv[225:305, 260:364] = (70, 160, 207)  # Izolovaná podobná plocha na souši.
+        hsv[225:305, 260:364] = (70, 160, 207)
         frame = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
         center, radius = (483, 260), 65
         cv2.ellipse(frame, (483, 232), (14, 13), 0, 0, 360, (170, 50, 105), -1)
@@ -373,4 +372,3 @@ class RecordedWorkflow(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

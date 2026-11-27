@@ -4,10 +4,13 @@ from __future__ import annotations
 import base64
 import logging
 import subprocess
+import sys
+from collections.abc import Callable
 from threading import Thread
 
 import cv2
 
+from runtime_state import classify_mission_text
 from window import Image
 
 _OCR = r"""
@@ -44,6 +47,8 @@ while ($null -ne ($line = [Console]::ReadLine())) {
 
 
 def read_cards(cards: list[Image]) -> list[str]:
+    if sys.platform != "win32" or not cards:
+        return ["" for _ in cards]
     packets = []
     for card in cards:
         enlarged = cv2.resize(card, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
@@ -51,15 +56,20 @@ def read_cards(cards: list[Image]) -> list[str]:
         if not ok:
             raise ValueError("Snímek mise nelze připravit.")
         packets.append(base64.b64encode(pixels))
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     result = subprocess.run(
         ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", _OCR],
         input=b"\n".join(packets) + b"\n", capture_output=True, timeout=25, check=True,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=creationflags,
     )
     return result.stdout.decode("utf-8", errors="replace").splitlines()
 
 
-def log_cards(log: logging.Logger, pages: tuple[tuple[str, Image], ...]) -> None:
+def log_cards(
+    log: logging.Logger,
+    pages: tuple[tuple[str, Image], ...],
+    on_text: Callable[[str, str], None] | None = None,
+) -> None:
     def read() -> None:
         try:
             texts = read_cards([card for _, card in pages])
@@ -67,8 +77,11 @@ def log_cards(log: logging.Logger, pages: tuple[tuple[str, Image], ...]) -> None
             log.info("Přepis textu misí je nedostupný. Pokračuji podle rozpoznaných herních prvků.")
             return
         for (number, _), text in zip(pages, texts):
-            if text.strip():
-                log.info("Text mise %s: %s", number, text.strip())
+            cleaned = text.strip()
+            if cleaned:
+                log.info("Text mise %s: %s", number, cleaned)
+                if on_text is not None:
+                    on_text(number, cleaned)
 
     if pages:
         Thread(target=read, name="fishao-mission-text", daemon=True).start()
